@@ -51,7 +51,6 @@ function syncAllGates() {
     io.emit('updateGateList', list);
 }
 
-// Logic to check if a gate is blocking the path
 function isPathBlocked(room, x1, y1, x2, y2) {
     let dx = x2 - x1;
     let dy = y2 - y1;
@@ -141,7 +140,7 @@ io.on('connection', (socket) => {
             players: [
                 { id: socket.id, name: data.user, ...corners[0], mana: Math.floor(Math.random()*201)+100, alive: true, isAI: false, color: PLAYER_COLORS[0], quit: false, powerUp: null },
                 { id: 'ai1', name: AI_NAMES[1], ...corners[1], mana: Math.floor(Math.random()*201)+100, alive: true, isAI: true, color: PLAYER_COLORS[1], quit: false, powerUp: null },
-                { id: 'ai2', name: AI_NAMES[2], ...corners[2], mana: Math.floor(Math.random()*201)+100, alive: true, isAI: true, color: PLAYER_COLORS[2], quit: false, powerUp: null },
+                { id: 'ai2', name: AI_NAMES[2], ...corners[2], mana: Math.floor(Math.random()*201)+100, alive: true, isAI: true, color: PLAYER_COLORS[3], quit: false, powerUp: null },
                 { id: 'ai3', name: AI_NAMES[3], ...corners[3], mana: Math.floor(Math.random()*201)+100, alive: true, isAI: true, color: PLAYER_COLORS[3], quit: false, powerUp: null }
             ],
             world: {}
@@ -314,10 +313,15 @@ function triggerRespawn(room, lastPlayerId) {
     
     room.respawnHappened = true; 
 
+    // Calculate total mana pool of all hunters at the moment of death
+    const totalCurrentMana = candidates.reduce((sum, pl) => sum + pl.mana, 0);
+    // Determine a random bonus between 500 and 1500
+    const resurrectionBonus = Math.floor(Math.random() * 1001) + 500;
+    // New starting mana for everyone
+    const nextLevelMana = totalCurrentMana + resurrectionBonus;
+
     candidates.forEach(pl => { 
-        if (!pl.alive || pl.id !== lastPlayerId) {
-            pl.mana = Math.floor(Math.random() * 1001) + 500; 
-        }
+        pl.mana = nextLevelMana;
         pl.alive = true;
     });
     
@@ -325,7 +329,7 @@ function triggerRespawn(room, lastPlayerId) {
     room.globalTurns = 0;
     room.survivorTurns = 0; 
     for(let i=0; i<5; i++) spawnGate(room);
-    io.to(room.id).emit('announcement', "SYSTEM: SURVIVOR FAILED. ALL HUNTERS RESURRECTED.");
+    io.to(room.id).emit('announcement', `SYSTEM: SURVIVOR FAILED. MANA POOL COMBINED. ALL HUNTERS RESURRECTED AT ${nextLevelMana} MP.`);
     broadcastGameState(room);
 }
 
@@ -414,6 +418,5 @@ function advanceTurn(room) {
     if (rooms[room.id]) broadcastGameState(room);
 }
 
-// PORT logic for online deployment
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => console.log(`SYSTEM: Server is active on port ${PORT}`));
