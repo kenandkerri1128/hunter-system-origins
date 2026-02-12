@@ -314,7 +314,7 @@ function triggerRespawn(room, lastPlayerId) {
     room.respawnHappened = true; 
 
     candidates.forEach(pl => { 
-        // Individual Respawn Logic: Previous MP + Random Bonus (500-1500)
+        // Individual Respawn Logic: CURRENT Mana Points + Random Bonus (500-1500)
         const resurrectionBonus = Math.floor(Math.random() * 1001) + 500;
         pl.mana += resurrectionBonus; 
         pl.alive = true;
