@@ -313,15 +313,10 @@ function triggerRespawn(room, lastPlayerId) {
     
     room.respawnHappened = true; 
 
-    // Calculate total mana pool of all hunters at the moment of death
-    const totalCurrentMana = candidates.reduce((sum, pl) => sum + pl.mana, 0);
-    // Determine a random bonus between 500 and 1500
-    const resurrectionBonus = Math.floor(Math.random() * 1001) + 500;
-    // New starting mana for everyone
-    const nextLevelMana = totalCurrentMana + resurrectionBonus;
-
     candidates.forEach(pl => { 
-        pl.mana = nextLevelMana;
+        // Individual Respawn Logic: Previous MP + Random Bonus (500-1500)
+        const resurrectionBonus = Math.floor(Math.random() * 1001) + 500;
+        pl.mana += resurrectionBonus; 
         pl.alive = true;
     });
     
@@ -329,7 +324,7 @@ function triggerRespawn(room, lastPlayerId) {
     room.globalTurns = 0;
     room.survivorTurns = 0; 
     for(let i=0; i<5; i++) spawnGate(room);
-    io.to(room.id).emit('announcement', `SYSTEM: SURVIVOR FAILED. MANA POOL COMBINED. ALL HUNTERS RESURRECTED AT ${nextLevelMana} MP.`);
+    io.to(room.id).emit('announcement', `SYSTEM: QUEST FAILED. ALL HUNTERS REAWAKENED WITH MASSIVE MP BONUSES.`);
     broadcastGameState(room);
 }
 
