@@ -21,7 +21,7 @@ const PLAYER_COLORS = ['#00d2ff', '#ff3e3e', '#bcff00', '#ff00ff'];
 const RANK_COLORS = { 'E': '#00ff00', 'D': '#99ff00', 'C': '#ffff00', 'B': '#ff9900', 'A': '#ff00ff', 'S': '#ff0000', 'Silver': '#ffffff' };
 const POWER_UPS = ['DOUBLE DAMAGE', 'GHOST WALK', 'NETHER SWAP'];
 
-// --- RANKING HELPERS ---
+// --- RANKING HELPERS (UPDATED WITH LOWER/HIGHER FOR ALL) ---
 function getFullRankLabel(mana) {
     if (mana >= 1000) return "Higher S-Rank";
     if (mana >= 901) return "Lower S-Rank";
@@ -74,12 +74,9 @@ function isPathBlocked(room, x1, y1, x2, y2) {
 }
 
 io.on('connection', (socket) => {
-    // --- CHAT SYSTEM FIXED ---
     socket.on('joinChatRoom', (roomId) => {
-        // We no longer force leave all rooms, so profile chat (global) stays active
         if (roomId) {
             socket.join(roomId);
-            // Only emit clearChat to the player who JOINED, not the whole room
             socket.emit('clearChat');
         }
     });
@@ -125,7 +122,14 @@ io.on('connection', (socket) => {
             syncAllGates();
             
             const { data: rankingData } = await supabase.from('Hunters').select('username, manapoints, wins, losses').order('manapoints', { ascending: false }).limit(100);
-            socket.emit('updateWorldRankings', rankingData);
+            
+            // Format ranking data with the full labels before sending
+            const formattedRankings = rankingData.map(r => ({
+                ...r,
+                rankLabel: getFullRankLabel(r.manapoints)
+            }));
+
+            socket.emit('updateWorldRankings', formattedRankings);
         } else {
             socket.emit('authError', "INVALID ACCESS CODE OR ID");
         }
@@ -133,7 +137,11 @@ io.on('connection', (socket) => {
 
     socket.on('requestWorldRankings', async () => {
         const { data } = await supabase.from('Hunters').select('username, manapoints, wins, losses').order('manapoints', { ascending: false }).limit(100);
-        socket.emit('updateWorldRankings', data);
+        const formattedRankings = data.map(r => ({
+            ...r,
+            rankLabel: getFullRankLabel(r.manapoints)
+        }));
+        socket.emit('updateWorldRankings', formattedRankings);
     });
 
     socket.on('requestGateList', () => syncAllGates());
@@ -258,7 +266,6 @@ io.on('connection', (socket) => {
             const activeHuman = room.players.filter(pl => !pl.quit && !pl.isAI);
             if (activeHuman.length === 1 && room.active && room.isOnline) {
                 const winner = activeHuman[0];
-                const winValue = parseInt(winner.mana.toString()[0]);
                 const { data: u } = await supabase.from('Hunters').select('manapoints, wins').eq('username', winner.name).maybeSingle();
                 if (u) await supabase.from('Hunters').update({ 
                     manapoints: u.manapoints + 20,
@@ -311,13 +318,15 @@ async function resolveConflict(room, p) {
     const opponent = room.players.find(o => o.id !== p.id && o.alive && o.x === p.x && o.y === p.y);
     const aliveCount = room.players.filter(pl => pl.alive).length;
     
+    // --- VS SCREEN TRIGGER FOR PVP ---
     if (opponent) {
-        // Broadcast battleStart to EVERYONE in the room so they see the VS Screen
         io.to(room.id).emit('battleStart', { 
             hunter: p.name, 
+            hunterMana: p.mana, // Added for VS UI
             target: opponent.name, 
             targetId: opponent.id, 
-            targetMana: opponent.mana
+            targetMana: opponent.mana,
+            targetRank: getPlainRankLabel(opponent.mana) // Added for VS UI
         });
 
         await new Promise(r => setTimeout(r, 6000));
@@ -371,9 +380,16 @@ async function resolveConflict(room, p) {
         return;
     }
 
+    // --- VS SCREEN TRIGGER FOR GATES ---
     if (room.world[coord]) {
         const gate = room.world[coord];
-        io.to(room.id).emit('battleStart', { hunter: p.name, target: `RANK ${gate.rank}`, targetMana: gate.mana });
+        io.to(room.id).emit('battleStart', { 
+            hunter: p.name, 
+            hunterMana: p.mana,
+            target: `RANK ${gate.rank}`, 
+            targetMana: gate.mana,
+            targetRank: gate.rank 
+        });
         await new Promise(r => setTimeout(r, 5000));
         
         if (p.mana >= gate.mana) {
