@@ -46,7 +46,7 @@
     <div id="screen-menu" class="screen">
         <div style="position:absolute; right:40px; top:20px; text-align:right;">
             <h1 id="st-name" style="font-size: 2.8rem; margin:0;">---</h1>
-            <div id="st-world-rank" style="font-size: 1.2rem; font-weight: 900; margin: 5px 0;">WORLD RANK: ---</div>
+            <div id="st-world-rank" style="font-size: 1.2rem; font-weight: 900; margin: 5px 0;">STATUS: REGISTERED</div>
             <div id="st-stats" style="font-size: 1rem; color: #aaa; margin-bottom: 5px;">WINS: 0 | LOSSES: 0</div>
             <div id="st-rank" style="font-size: 1.8rem; font-weight: 900; margin:0;">---</div>
             <div id="st-mp" style="font-size: 1.5rem; margin:0; color:white;">MP: ---</div>
@@ -55,7 +55,7 @@
         <div style="display: flex; gap: 20px;">
             <div style="border:2px solid var(--sys-blue); width:400px; padding:20px; background:rgba(0,0,0,0.8);">
                 <h3>WORLD RANKINGS</h3>
-                <div id="world-rank-list" style="height: 300px; overflow-y: auto;"></div>
+                <div id="world-rank-list" style="height: 300px; overflow-y: auto; font-family: 'Orbitron';"></div>
             </div>
             <div class="sidebar" style="height: 400px; width: 300px;">
                 <h3>GLOBAL CHANNEL</h3>
@@ -131,15 +131,28 @@
             if(id === 'screen-menu') socket.emit('requestWorldRankings');
         }
 
+        // UPDATED: Using 'manapoints' to match DB columns
         function updateHUD(d) {
             document.getElementById('st-name').innerText = d.username;
-            document.getElementById('st-rank').innerText = d.rank; 
-            document.getElementById('st-mp').innerText = `MP: ${d.mana}`;
+            document.getElementById('st-rank').innerText = d.rank || "LOWER E"; 
+            document.getElementById('st-mp').innerText = `MP: ${d.mana || d.manapoints || 0}`;
             document.getElementById('st-stats').innerText = `WINS: ${d.wins || 0} | LOSSES: ${d.losses || 0}`;
         }
 
+        socket.on('updateWorldRankings', (list) => {
+            const listDiv = document.getElementById('world-rank-list');
+            listDiv.innerHTML = '';
+            list.forEach((h, i) => {
+                listDiv.innerHTML += `<div style="padding:5px; border-bottom:1px solid #222;">
+                    ${i+1}. ${h.username} - <span style="color:var(--sys-blue)">${h.manapoints} MP</span>
+                </div>`;
+            });
+        });
+
         function startQuest() {
             myRoomID = "SOLO_DUNGEON_" + myHunter.username;
+            // Map manapoints to mana for the game logic
+            myHunter.mana = myHunter.mana || myHunter.manapoints || 0;
             socket.emit('joinRoom', { roomId: myRoomID, hunter: myHunter });
             showScreen('screen-game');
         }
@@ -148,7 +161,6 @@
             const board = document.getElementById('game-board');
             board.innerHTML = '';
             
-            // Check for Silver Gate Presence
             const silverGate = Object.values(room.world).find(g => g.type === 'silver');
             const silverUI = document.getElementById('tc-silver-container');
             if(silverGate) {
@@ -194,6 +206,12 @@
         socket.on('receiveMessage', (d) => {
             const container = document.getElementById('game-chat-msgs');
             container.innerHTML += `<div class="chat-msg"><span class="chat-rank">[${d.rank}]</span><b>${d.sender}:</b> ${d.text}</div>`;
+            container.scrollTop = container.scrollHeight;
+        });
+
+        socket.on('receiveGlobalMessage', (d) => {
+            const container = document.getElementById('global-chat-msgs');
+            container.innerHTML += `<div class="chat-msg"><b>${d.sender}:</b> ${d.text}</div>`;
             container.scrollTop = container.scrollHeight;
         });
 
