@@ -32,7 +32,8 @@
         .sidebar { width: 350px; border: 2px solid var(--sys-blue); background: #000; padding: 15px; height: 650px; display: flex; flex-direction: column; }
         .party-member { font-size: 16px; font-weight: 900; margin-bottom: 8px; border-bottom: 1px solid #222; padding: 5px 0; }
         
-        #vs-panel { display: none; background: rgba(20,0,0,0.95); border: 2px solid var(--sys-red); padding: 15px; margin-top: 10px; flex-direction: column; align-items: center; box-shadow: 0 0 20px var(--sys-red); z-index: 1000; }
+        /* FIX: VS Panel integrated into Sidebar */
+        #vs-panel { display: none; background: rgba(30,0,0,1); border: 2px solid var(--sys-red); padding: 10px; margin-top: 5px; flex-direction: column; align-items: center; box-shadow: 0 0 15px var(--sys-red); width: 90%; align-self: center; }
         .v-fill { height: 6px; background: var(--sys-red); width: 0%; transition: 5s linear; margin-top: 10px; }
         #turn-counter { margin-top: 10px; padding: 10px; border: 1px solid #333; font-size: 14px; text-align: center; color: var(--sys-gold); }
         #victory-screen { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.95); z-index: 10000; flex-direction: column; align-items: center; justify-content: center; text-align: center;}
@@ -134,8 +135,8 @@
                 
                 <div id="vs-panel">
                     <span id="vs-title" style="color:var(--sys-red); font-weight:900;">COMBAT INITIATED</span>
-                    <div id="vs-data" style="font-size: 18px; text-align: center; margin: 10px 0;"></div>
-                    <div id="skill-area" style="min-height: 80px; display: flex; flex-direction: column; align-items: center; justify-content: center; border-top: 1px solid #333; width: 100%;"></div>
+                    <div id="vs-data" style="font-size: 16px; text-align: center; margin: 10px 0;"></div>
+                    <div id="skill-area" style="min-height: 40px; display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%;"></div>
                     <div style="width:100%; height:4px; background:#111;"><div class="v-fill" id="vs-fill"></div></div>
                 </div>
 
@@ -190,6 +191,12 @@
             msg.innerHTML = `<b style="color:var(--sys-blue)">[${data.rank}] ${data.sender}:</b> ${data.text}`;
             chatBox.appendChild(msg);
             chatBox.scrollTop = chatBox.scrollHeight;
+        });
+
+        // Chat Isolation Handler
+        socket.on('joinedRoom', (roomId) => {
+            myRoomID = roomId;
+            document.getElementById('chat-messages').innerHTML = `<div style="color:grey; font-size:10px; text-align:center;">--- ENTERED ROOM: ${roomId} ---</div>`;
         });
 
         function moveChat(anchorId) {
@@ -284,7 +291,6 @@
             renderRankings();
         });
 
-        // RE-FIXED MULTIPLAYER BUTTON ACTION
         function openOnlineLobby() {
             if(!myHunter) return;
             resetGameUI();
@@ -304,9 +310,11 @@
             document.getElementById('vs-panel').style.display = 'none';
         }
 
-        socket.on('gameStart', () => { resetGameUI(); showScreen('screen-game'); });
+        socket.on('gameStart', (data) => { 
+            resetGameUI(); 
+            showScreen('screen-game'); 
+        });
 
-        // VS SCREEN LOGIC - NOW TRIGGERS ON ALL ENGAGEMENTS
         socket.on('battleInitiated', (data) => {
             const vsPanel = document.getElementById('vs-panel');
             const vsData = document.getElementById('vs-data');
@@ -316,20 +324,16 @@
             vsPanel.style.display = 'flex';
             vsFill.style.transition = 'none';
             vsFill.style.width = '0%';
-            
-            // Force reflow for animation
-            void vsFill.offsetWidth;
-            
+            void vsFill.offsetWidth; 
             vsFill.style.transition = '5s linear';
             vsFill.style.width = '100%';
 
-            // HIDE EXACT MP FOR OPPONENT IN VS SCREEN
             const isDefenderMe = data.defender.id === socket.id;
             const defenderMPDisplay = isDefenderMe ? data.defender.mana : getShortRankLabel(data.defender.mana);
 
             vsData.innerHTML = `
                 <div style="font-weight:900; color:white;">${data.attacker.name} <span style="color:var(--sys-red)">VS</span> ${data.defender.name}</div>
-                <div style="font-size:14px; color:var(--sys-blue); margin-top:5px;">OPPONENT: ${defenderMPDisplay}</div>
+                <div style="font-size:12px; color:var(--sys-blue); margin-top:5px;">DEFENDER RANK: ${defenderMPDisplay}</div>
             `;
 
             skillArea.innerHTML = "";
@@ -367,15 +371,11 @@
             document.getElementById('tc-spawn').innerText = 3 - (s.globalTurns % 3);
             document.getElementById('turn-txt').innerText = isTurn ? ">> YOUR MOVE" : `>> ${s.players[s.turn].name.toUpperCase()} ACTING`;
 
-            // PARTY LIST - HIDING OPPONENT MP
             document.getElementById('party-list').innerHTML = s.players.map(p => {
                 let status = p.quit ? '(QUIT)' : (p.alive ? '' : '(KIA)');
                 let rLabel = getShortRankLabel(p.mana); 
-                
                 const wRankIdx = currentWorldRankings.findIndex(h => h.username === p.name);
                 const wRankDisplay = wRankIdx !== -1 ? `#${wRankIdx + 1}` : '#??';
-
-                // Logical toggle: only show MP if it's the current local player
                 const mpValue = (p.id === socket.id) ? `MP: ${p.mana}` : rLabel;
 
                 return `<div class="party-member" style="color:${p.quit ? '#444' : p.color}">
