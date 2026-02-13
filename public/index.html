@@ -37,12 +37,17 @@
         .skill-activate-btn { background: var(--sys-gold); color: #000; border: none; padding: 8px 20px; font-family: 'Orbitron'; font-weight: 900; cursor: pointer; margin-top: 10px; animation: pulse 0.6s infinite alternate; border-radius: 4px; box-shadow: 0 0 15px var(--sys-gold); }
         @keyframes pulse { from { transform: scale(1); filter: brightness(1); } to { transform: scale(1.1); filter: brightness(1.3); } }
 
-        /* GLOBAL CHAT STYLING (Newly Added for Integration) */
+        /* GLOBAL CHAT STYLING */
         #global-chat-container { width: 400px; height: 200px; border: 2px solid var(--sys-blue); background: rgba(0,0,0,0.8); display: none; flex-direction: column; margin-top: 10px; }
         #chat-messages { flex-grow: 1; overflow-y: auto; padding: 5px; font-size: 12px; font-family: 'Orbitron'; }
         .chat-input-row { display: flex; border-top: 1px solid var(--sys-blue); }
         .chat-input-row input { flex-grow: 1; background: #000; border: none; color: white; padding: 5px; outline: none; }
         .chat-input-row button { background: var(--sys-blue); border: none; padding: 5px 10px; cursor: pointer; font-weight: 900; }
+
+        /* RANKING TABLE STYLES */
+        #world-rank-list { max-height: 300px; overflow-y: auto; margin-bottom: 10px; }
+        .see-more-btn { background: transparent; border: 1px solid var(--sys-blue); color: var(--sys-blue); width: 100%; padding: 5px; cursor: pointer; font-family: 'Orbitron'; font-size: 10px; font-weight: 900; transition: 0.3s; }
+        .see-more-btn:hover { background: var(--sys-blue); color: #000; }
     </style>
 </head>
 <body>
@@ -74,6 +79,7 @@
         <div style="border:2px solid var(--sys-blue); width:400px; padding:20px; background:rgba(0,0,0,0.8);">
             <h3>WORLD RANKINGS</h3>
             <div id="world-rank-list"></div>
+            <button id="see-more-ranks" class="see-more-btn" onclick="toggleRankLimit()">SEE MORE</button>
         </div>
 
         <div id="global-chat-container">
@@ -174,6 +180,7 @@
         let currentPass = ""; 
         let currentWorldRankings = [];
         let currentBGM = "";
+        let showingFullRankings = false;
 
         const POWER_ICONS = { 'DOUBLE DAMAGE': '⚔️', 'GHOST WALK': '👣', 'NETHER SWAP': '🌀' };
 
@@ -238,7 +245,6 @@
             return "LOWER E";
         }
 
-        // --- 3. SHORT RANK LABEL FIX ---
         function getShortRankLabel(m) {
             if(m >= 901) return "S-RANK";
             if(m >= 701) return "A-RANK";
@@ -267,7 +273,6 @@
             const target = document.getElementById(id);
             if(target) target.classList.add('active'); 
             
-            // Manage Chat Visibility & Music
             if(id === 'screen-menu') {
                 document.getElementById('global-chat-container').style.display = 'flex';
                 playMusic('menu.mp3');
@@ -305,6 +310,27 @@
             if(document.getElementById('screen-auth').classList.contains('active')) showScreen('screen-menu'); 
         });
 
+        // --- WORLD RANKING DISPLAY LOGIC ---
+        function toggleRankLimit() {
+            showingFullRankings = !showingFullRankings;
+            document.getElementById('see-more-ranks').innerText = showingFullRankings ? "SEE LESS" : "SEE MORE";
+            renderRankings();
+        }
+
+        function renderRankings() {
+            const list = document.getElementById('world-rank-list');
+            const limit = showingFullRankings ? 100 : 10;
+            const playersToShow = currentWorldRankings.slice(0, limit);
+
+            list.innerHTML = playersToShow.map((h, i) => {
+                const color = getRankColor(i);
+                return `<div style="display:flex; justify-content:space-between; padding:5px; border-bottom:1px solid #222; font-weight:900; color:${color};">
+                    <span>#${i+1} ${h.username}</span> 
+                    <span style="color:var(--sys-blue);">${h.manapoints} MP</span>
+                </div>`;
+            }).join('') || "NO HUNTERS DETECTED";
+        }
+
         socket.on('updateWorldRankings', (l) => {
             currentWorldRankings = l;
             if (myHunter) {
@@ -313,13 +339,7 @@
                 stWR.innerText = rankData.rankText;
                 stWR.style.color = rankData.color;
             }
-            document.getElementById('world-rank-list').innerHTML = l.map((h, i) => {
-                const color = getRankColor(i);
-                return `<div style="display:flex; justify-content:space-between; padding:5px; border-bottom:1px solid #222; font-weight:900; color:${color};">
-                    <span>#${i+1} ${h.username}</span> 
-                    <span style="color:var(--sys-blue);">${h.manapoints} MP</span>
-                </div>`;
-            }).join('');
+            renderRankings();
         });
 
         function openOnlineLobby() { showScreen('screen-online'); socket.emit('requestGateList'); }
@@ -429,7 +449,6 @@
             document.getElementById('party-list').innerHTML = s.players.map(p => {
                 let status = p.quit ? '(QUIT)' : (p.alive ? '' : '(KIA)');
                 let powerInfo = (p.id === socket.id && p.powerUp) ? `<div class="power-icon">${POWER_ICONS[p.powerUp]} ${p.powerUp}</div>` : "";
-                // Using SHORT label for the encircled part (the list)
                 let rLabel = getShortRankLabel(p.mana); 
                 let manaInfo = p.id === socket.id ? `[MP: ${p.mana}]` : `[${rLabel}]`;
                 return `<div class="party-member" style="color:${p.quit ? '#444' : p.color}">${p.name} ${manaInfo} ${status} ${powerInfo}</div>`;
