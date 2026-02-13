@@ -36,6 +36,14 @@
         .power-icon { font-size: 14px; margin-top: 2px; color: var(--sys-gold); }
         .skill-activate-btn { background: var(--sys-gold); color: #000; border: none; padding: 8px 20px; font-family: 'Orbitron'; font-weight: 900; cursor: pointer; margin-top: 10px; animation: pulse 0.6s infinite alternate; border-radius: 4px; box-shadow: 0 0 15px var(--sys-gold); }
         @keyframes pulse { from { transform: scale(1); filter: brightness(1); } to { transform: scale(1.1); filter: brightness(1.3); } }
+
+        /* --- CHAT SYSTEM STYLES --- */
+        #chat-container { display: none; position: fixed; bottom: 20px; left: 20px; width: 320px; height: 200px; background: rgba(0, 0, 0, 0.9); border: 1px solid var(--sys-blue); flex-direction: column; z-index: 9999; box-shadow: 0 0 15px rgba(0, 210, 255, 0.3); }
+        #chat-messages { flex-grow: 1; overflow-y: auto; padding: 8px; font-size: 11px; color: #fff; font-family: 'Exo 2'; border-bottom: 1px solid #222; }
+        #chat-input-area { display: flex; background: #000; }
+        #chat-input { flex-grow: 1; background: #000; border: none; color: var(--sys-blue); padding: 10px; outline: none; font-family: 'Orbitron'; font-size: 10px; }
+        .chat-msg { margin-bottom: 4px; line-height: 1.2; border-left: 2px solid var(--sys-blue); padding-left: 5px; }
+        .chat-name { font-weight: 900; color: var(--sys-blue); margin-right: 5px; text-transform: uppercase; }
     </style>
 </head>
 <body>
@@ -148,6 +156,13 @@
         </div>
     </div>
 
+    <div id="chat-container">
+        <div id="chat-messages"></div>
+        <div id="chat-input-area">
+            <input type="text" id="chat-input" placeholder="BROADCAST MESSAGE..." autocomplete="off">
+        </div>
+    </div>
+
     <script>
         const socket = io();
         
@@ -157,6 +172,11 @@
         let currentWorldRankings = [];
 
         const POWER_ICONS = { 'DOUBLE DAMAGE': '⚔️', 'GHOST WALK': '👣', 'NETHER SWAP': '🌀' };
+
+        // Chat Elements
+        const chatContainer = document.getElementById('chat-container');
+        const chatMessages = document.getElementById('chat-messages');
+        const chatInput = document.getElementById('chat-input');
 
         function getRankColor(index) {
             const rank = index + 1;
@@ -174,7 +194,6 @@
             };
         }
 
-        // Updated for Side-Bar/HUD: Removes Higher/Lower
         function getShortRankLabel(m) {
             if(m >= 901) return "S-RANK";
             if(m >= 701) return "A-RANK";
@@ -197,14 +216,23 @@
             return false;
         }
 
+        function clearChat() { chatMessages.innerHTML = ""; }
+
         function showScreen(id) { 
             const screens = document.querySelectorAll('.screen');
             screens.forEach(s => s.classList.remove('active')); 
             const target = document.getElementById(id);
             if(target) target.classList.add('active'); 
+
+            // Handle Chat Visibility
+            const chatVisibleScreens = ['screen-online', 'screen-waiting', 'screen-game'];
+            chatContainer.style.display = chatVisibleScreens.includes(id) ? 'flex' : 'none';
+
             if(id === 'screen-menu' && myHunter) { 
                 socket.emit('requestWorldRankings');
                 socket.emit('authRequest', {type:'login', u:myHunter.username, p:currentPass}); 
+                myRoomID = null;
+                clearChat(); // Clear when returning to menu
             }
         }
         
@@ -215,6 +243,26 @@
             currentPass = p;
             socket.emit('authRequest', { type, u, p }); 
         }
+
+        // Chat Input Listener
+        chatInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter' && chatInput.value.trim() !== "") {
+                socket.emit('sendChatMessage', {
+                    room: myRoomID || 'lobby',
+                    msg: chatInput.value.trim(),
+                    user: myHunter.username
+                });
+                chatInput.value = "";
+            }
+        });
+
+        socket.on('receiveChatMessage', (data) => {
+            const div = document.createElement('div');
+            div.className = 'chat-msg';
+            div.innerHTML = `<span class="chat-name">${data.user}:</span> <span>${data.msg}</span>`;
+            chatMessages.appendChild(div);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        });
 
         socket.on('authError', (msg) => alert(msg));
         
@@ -250,7 +298,12 @@
             }).join('');
         });
 
-        function openOnlineLobby() { showScreen('screen-online'); socket.emit('requestGateList'); }
+        function openOnlineLobby() { 
+            myRoomID = 'lobby';
+            clearChat(); 
+            showScreen('screen-online'); 
+            socket.emit('requestGateList'); 
+        }
         function createGate() { socket.emit('createGate', { name: document.getElementById('gn').value || "UNKNOWN GATE", host: myHunter.username }); }
         function confirmReady() { socket.emit('playerConfirm', { gateID: myRoomID }); document.getElementById('ready-btn').style.display='none'; }
         
@@ -259,6 +312,7 @@
         });
 
         socket.on('waitingRoomUpdate', (room) => {
+            if (myRoomID !== room.id) clearChat(); // Wipe lobby chat when entering room
             showScreen('screen-waiting');
             myRoomID = room.id;
             document.getElementById('wait-slots').innerHTML = room.players.map(p => {
@@ -284,7 +338,11 @@
             document.getElementById('victory-screen').style.display = 'none';
         }
 
-        socket.on('gameStart', () => { resetGameUI(); showScreen('screen-game'); });
+        socket.on('gameStart', () => { 
+            clearChat(); // Wipe waiting room chat when game starts
+            resetGameUI(); 
+            showScreen('screen-game'); 
+        });
 
         socket.on('battleStart', (d) => {
             const p = document.getElementById('vs-panel');
@@ -349,12 +407,9 @@
             document.getElementById('tc-spawn').innerText = 3 - (Math.floor(s.globalTurns / s.players.length) % 3);
             document.getElementById('turn-txt').innerText = isTurn ? ">> YOUR MOVE" : `>> ${s.players[s.turn].name.toUpperCase()} ACTING`;
 
-            // Updated Side-Bar Party List
             document.getElementById('party-list').innerHTML = s.players.map(p => {
                 let status = p.quit ? '(QUIT)' : (p.alive ? '' : '(KIA)');
                 let powerInfo = (p.id === socket.id && p.powerUp) ? `<div class="power-icon">${POWER_ICONS[p.powerUp]} ${p.powerUp}</div>` : "";
-                
-                // FIXED: Use the Short Rank Label here
                 let rLabel = getShortRankLabel(p.mana); 
                 let manaInfo = p.id === socket.id ? `[MP: ${p.mana}]` : `[${rLabel}]`;
                 return `<div class="party-member" style="color:${p.quit ? '#444' : p.color}">${p.name} ${manaInfo} ${status} ${powerInfo}</div>`;
@@ -381,10 +436,7 @@
                             const h = document.createElement('div');
                             h.className = 'humanoid';
                             let pwrTag = (p.id === socket.id && p.powerUp) ? `<span class="power-icon">${POWER_ICONS[p.powerUp]}</span>` : "";
-                            
-                            // FIXED: Directly use the rankLabel sent from the server to ensure 100% sync
                             let shortRank = p.rankLabel || getShortRankLabel(p.mana);
-
                             h.innerHTML = `<div class="name-tag" style="color:${p.color}">${p.name} (${shortRank})${pwrTag}</div>
                                            <div class="h-head" style="background:${p.color}"></div>
                                            <div class="h-body" style="background:${p.color}"></div>`;
