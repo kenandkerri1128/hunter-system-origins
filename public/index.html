@@ -44,6 +44,10 @@
 </head>
 <body>
 
+    <audio id="sys-bgm" loop>
+        <source id="bgm-source" src="/music/menu.mp3" type="audio/mpeg">
+    </audio>
+
     <div id="victory-screen">
         <h1 style="font-size: 5rem; color: var(--sys-gold);">QUEST COMPLETE</h1>
         <h2 id="winner-name" style="font-size: 3rem; color: #fff;">---</h2>
@@ -175,6 +179,27 @@
         let myHunter = null, myRoomID = null, currentPass = "", currentWorldRankings = [];
         const POWER_ICONS = { 'DOUBLE DAMAGE': '⚔️', 'GHOST WALK': '👣', 'NETHER SWAP': '🌀' };
 
+        // --- AUDIO SYSTEM ---
+        const bgm = document.getElementById('sys-bgm');
+        const bgmSource = document.getElementById('bgm-source');
+        const TRACKS = {
+            'screen-auth': '/music/menu.mp3',
+            'screen-menu': '/music/menu.mp3',
+            'screen-online': '/music/menu.mp3',
+            'screen-difficulty': '/music/menu.mp3',
+            'screen-waiting': '/music/waiting.mp3',
+            'screen-game': '/music/gameplay.mp3'
+        };
+
+        function playMusicForScreen(screenId) {
+            const trackPath = TRACKS[screenId];
+            if (trackPath && !bgmSource.src.includes(trackPath)) {
+                bgmSource.src = trackPath;
+                bgm.load();
+                bgm.play().catch(e => console.log("System: Waiting for hunter interaction to initiate audio."));
+            }
+        }
+
         // --- RANKING LOGIC ---
         function getDetailedRank(mana) {
             if (mana >= 1000) return "HIGHER S";
@@ -233,6 +258,10 @@
             document.querySelectorAll('.screen').forEach(s => s.classList.remove('active')); 
             const target = document.getElementById(id);
             if(target) target.classList.add('active'); 
+            
+            // Trigger Music Change
+            playMusicForScreen(id);
+
             if(id === 'screen-menu' && myHunter) { 
                 socket.emit('requestWorldRankings');
             }
@@ -241,6 +270,10 @@
         function auth(type) { 
             const u = document.getElementById('u').value, p = document.getElementById('p').value;
             if(!u || !p) return alert("ENTER CREDENTIALS");
+            
+            // Audio requires user interaction to start
+            bgm.play().catch(() => {}); 
+            
             currentPass = p;
             socket.emit('authRequest', { type, u, p }); 
         }
@@ -252,6 +285,8 @@
             document.getElementById('st-mp').innerText = `MP: ${d.mana}`;
             showScreen('screen-menu'); 
         });
+
+        socket.on('authError', (msg) => alert(msg));
 
         socket.on('updateWorldRankings', (l) => {
             currentWorldRankings = l;
@@ -279,6 +314,8 @@
             if(silver) {
                 document.getElementById('tc-silver-container').style.display = 'block';
                 document.getElementById('silver-power').innerText = silver.power;
+            } else {
+                document.getElementById('tc-silver-container').style.display = 'none';
             }
 
             // Render Board
