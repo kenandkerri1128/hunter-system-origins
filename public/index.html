@@ -24,7 +24,7 @@
         .humanoid { position: absolute; bottom: 5px; left: 50%; transform: translateX(-50%); width: 24px; height: 30px; z-index: 10; pointer-events: none; }
         .h-head { width: 10px; height: 10px; border-radius: 50%; border: 1px solid white; margin: 0 auto; }
         .h-body { width: 20px; height: 15px; border: 1px solid white; border-radius: 4px 4px 0 0; }
-        .name-tag { position: absolute; top: -22px; left: 50%; transform: translateX(-50%); font-size: 10px; white-space: nowrap; font-weight: 900; background: #000; border: 1px solid #444; padding: 1px 4px; display: flex; flex-direction: column; align-items: center; }
+        .name-tag { position: absolute; top: -22px; left: 50%; transform: translateX(-50%); font-size: 10px; white-space: nowrap; font-weight: 900; background: #000; border: 1px solid #444; padding: 1px 4px; display: flex; flex-direction: column; align-items: center; z-index: 20; }
         
         /* UI Panels */
         .hud-left { width: 280px; background: rgba(0,0,0,0.9); border-right: 2px solid var(--sys-blue); padding: 15px; display: flex; flex-direction: column; height: 650px; overflow-y: auto; }
@@ -206,11 +206,13 @@
         function sendChatMessage() {
             const input = document.getElementById('chat-input');
             if (input.value.trim() !== "" && myHunter) {
+                // Front-end rank calculation for chat isn't critical since server overrides or handles it,
+                // but we keep it for immediate feedback if needed.
                 socket.emit('sendMessage', {
                     message: input.value,
                     senderName: myHunter.username,
                     roomId: myRoomID,
-                    rank: getShortRankLabel(myHunter.mana)
+                    rank: getShortRankLabel(myHunter.mana) 
                 });
                 input.value = "";
             }
@@ -219,12 +221,12 @@
         socket.on('receiveMessage', (data) => {
             const chatBox = document.getElementById('chat-messages');
             const msg = document.createElement('div');
+            // Server now sends the correct rank, we display it here.
             msg.innerHTML = `<b style="color:var(--sys-blue)">[${data.rank}] ${data.sender}:</b> ${data.text}`;
             chatBox.appendChild(msg);
             chatBox.scrollTop = chatBox.scrollHeight;
         });
 
-        // Chat Isolation Handler
         socket.on('joinedRoom', (roomId) => {
             myRoomID = roomId;
             document.getElementById('chat-messages').innerHTML = `<div style="color:grey; font-size:10px; text-align:center;">--- ENTERED ROOM: ${roomId} ---</div>`;
@@ -292,7 +294,6 @@
             const target = document.getElementById(id);
             if(target) target.classList.add('active'); 
             
-            // FIX: Added chat moving logic for Lobby and Waiting Room
             if(id === 'screen-menu') {
                 myRoomID = 'global';
                 moveChat('menu-chat-anchor');
@@ -325,6 +326,9 @@
             
             if(document.getElementById('screen-auth').classList.contains('active')) showScreen('screen-menu'); 
             renderRankings();
+
+            // FIX: Only change music if sent (login), otherwise ignore (profile update)
+            if(d.music) playMusic(d.music);
         });
 
         function openOnlineLobby() {
@@ -359,7 +363,6 @@
             showScreen('screen-waiting');
             document.getElementById('waiting-title').innerText = `GATE: ${room.name}`;
             
-            // Sync Chat
             if(myRoomID !== room.id) socket.emit('joinChatRoom', room.id);
 
             const container = document.getElementById('waiting-list');
@@ -412,7 +415,6 @@
             showScreen('screen-game'); 
         });
 
-        // FIX: VS Screen Handler
         socket.on('battleStart', (data) => {
             const vsPanel = document.getElementById('vs-panel');
             const vsData = document.getElementById('vs-data');
@@ -429,7 +431,6 @@
             const attackerColor = data.hunterColor || '#fff';
             const defenderColor = data.targetColor || '#fff';
 
-            // FIX: Removed "DEFENDER RANK:" prefix, now just shows raw data (e.g. MP: 5000)
             vsData.innerHTML = `
                 <div style="font-weight:900; color:white;">
                     <span style="color:${attackerColor}">${data.hunter}</span> 
@@ -455,7 +456,6 @@
             }
         });
 
-        // FIX: Added Battle End Listener to hide VS screen
         socket.on('battleEnd', () => {
              document.getElementById('vs-panel').style.display = 'none';
         });
@@ -482,9 +482,11 @@
 
             document.getElementById('party-list').innerHTML = s.players.map(p => {
                 let status = p.quit ? '(QUIT)' : (p.alive ? '' : '(KIA)');
-                let rLabel = getShortRankLabel(p.mana); 
+                // FIX: Use accurate displayRank from server (Rank E, Rank S, etc.)
+                let rLabel = p.displayRank || 'Rank E'; 
                 const wRankIdx = currentWorldRankings.findIndex(h => h.username === p.name);
                 const wRankDisplay = wRankIdx !== -1 ? `#${wRankIdx + 1}` : '#??';
+                // Show accurate MP if own, else show accurate Rank
                 const mpValue = (p.id === socket.id) ? `MP: ${p.mana}` : rLabel;
 
                 return `<div class="party-member" style="color:${p.quit ? '#444' : p.color}">
@@ -515,7 +517,10 @@
                         if(p.alive && p.x === x && p.y === y) {
                             const h = document.createElement('div');
                             h.className = 'humanoid';
-                            h.innerHTML = `<div class="name-tag" style="color:${p.color}">${p.name}</div>
+                            // FIX: Added Rank to Character UI Name Tag
+                            h.innerHTML = `<div class="name-tag" style="color:${p.color}">
+                                                ${p.name} <span style="font-size:8px; color:#ccc; display:block;">[${p.displayRank || 'E'}]</span>
+                                           </div>
                                            <div class="h-head" style="background:${p.color}"></div>
                                            <div class="h-body" style="background:${p.color}"></div>`;
                             cell.appendChild(h);
@@ -533,7 +538,6 @@
             board.innerHTML = `<div>> ${msg}</div>` + board.innerHTML;
         });
 
-        // Add Victory Event Handler
         socket.on('victoryEvent', (data) => {
             const vs = document.getElementById('victory-screen');
             vs.style.display = 'flex';
