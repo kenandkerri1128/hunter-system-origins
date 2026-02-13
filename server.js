@@ -74,17 +74,14 @@ function isPathBlocked(room, x1, y1, x2, y2) {
 }
 
 io.on('connection', (socket) => {
-    // --- CHAT SYSTEM (UPDATED: Room Isolation & Auto-Clear) ---
+    // --- CHAT SYSTEM FIXED ---
     socket.on('joinChatRoom', (roomId) => {
-        // Clear previous rooms to ensure isolation
-        const currentRooms = Array.from(socket.rooms);
-        currentRooms.forEach(r => { if(r !== socket.id) socket.leave(r); });
-        
+        // We no longer force leave all rooms, so profile chat (global) stays active
         if (roomId) {
             socket.join(roomId);
+            // Only emit clearChat to the player who JOINED, not the whole room
+            socket.emit('clearChat');
         }
-        // Frontend should listen for this to clear chat UI
-        socket.emit('clearChat');
     });
 
     socket.on('sendMessage', async (data) => {
@@ -99,11 +96,9 @@ io.on('connection', (socket) => {
             timestamp: new Date().toLocaleTimeString() 
         };
 
-        if (!roomId) {
-            // General Profile/Lobby chat
+        if (!roomId || roomId === 'global' || roomId === 'null') {
             io.emit('receiveMessage', chatData); 
         } else {
-            // Room specific chat (Multiplayer/Waiting/Ingame)
             io.to(roomId).emit('receiveMessage', chatData); 
         }
     });
@@ -317,15 +312,14 @@ async function resolveConflict(room, p) {
     const aliveCount = room.players.filter(pl => pl.alive).length;
     
     if (opponent) {
-        room.players.forEach(pl => {
-            io.to(pl.id).emit('battleStart', { 
-                hunter: p.name, 
-                target: opponent.name, 
-                targetId: opponent.id, 
-                targetMana: opponent.mana, 
-                powerUp: (pl.id === opponent.id || pl.id === p.id) ? pl.powerUp : null
-            });
+        // Broadcast battleStart to EVERYONE in the room so they see the VS Screen
+        io.to(room.id).emit('battleStart', { 
+            hunter: p.name, 
+            target: opponent.name, 
+            targetId: opponent.id, 
+            targetMana: opponent.mana
         });
+
         await new Promise(r => setTimeout(r, 6000));
         
         let pCalcMana = p.mana, oCalcMana = opponent.mana, combatCancelled = false;
@@ -423,7 +417,6 @@ async function resolveConflict(room, p) {
 async function recordLoss(username, winnerMana) {
     const { data: u } = await supabase.from('Hunters').select('manapoints, losses').eq('username', username).maybeSingle();
     if (u) {
-        // Logic: First digit of winner's mana is the MP loss (e.g. 10500 -> 1 MP)
         const lossAmount = parseInt(winnerMana.toString()[0]) || 1;
         await supabase.from('Hunters').update({ 
             manapoints: Math.max(0, u.manapoints - lossAmount), 
