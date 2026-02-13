@@ -362,7 +362,7 @@
                     <div style="font-size: 0.8rem; color:${rankData.color}; margin-top: 5px;">${rankData.rankText}</div>
                 </div>`;
             }).join('');
-            if(room.players.length >= 2) document.getElementById('ready-btn').style.display = 'block';
+            if(room.players.length >= 1) document.getElementById('ready-btn').style.display = 'block';
         });
 
         function startAI(diff) { 
@@ -443,7 +443,8 @@
                 document.getElementById('tc-silver-container').style.display = 'none';
             }
 
-            document.getElementById('tc-spawn').innerText = 3 - (Math.floor(s.globalTurns / s.players.length) % 3);
+            // Fixed random gate spawn counter display (cycles every 3 global turns)
+            document.getElementById('tc-spawn').innerText = 3 - (s.globalTurns % 3);
             document.getElementById('turn-txt').innerText = isTurn ? ">> YOUR MOVE" : `>> ${s.players[s.turn].name.toUpperCase()} ACTING`;
 
             document.getElementById('party-list').innerHTML = s.players.map(p => {
