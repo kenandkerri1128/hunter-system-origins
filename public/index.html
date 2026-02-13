@@ -1,379 +1,254 @@
-const express = require('express');
-const http = require('http');
-const { Server } = require('socket.io');
-const { createClient } = require('@supabase/supabase-js');
-const path = require('path');
-
-const app = express();
-const server = http.createServer(app);
-const io = new Server(server);
-
-// Supabase Configuration
-const SUPABASE_URL = 'https://wfsuxqgvshrhqfvnkzdx.supabase.co'; 
-const SUPABASE_KEY = 'sb_publishable_gV-RZMfBZ1dLU60Ht4J9iw_-sRWSKnL'; 
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
-
-app.use(express.static(path.join(__dirname, 'public')));
-
-// TRACKING
-let rooms = {};
-let connectedUsers = {}; 
-let adminSocketId = null;
-let recentAdminMessages = [];
-
-// CONFIGURATION & CONSTANTS
-const ADMIN_NAME = "Kei"; 
-const AI_NAMES = ["Sung Jinwoo", "Cha Hae-In", "Baek Yoonho", "Choi Jong-In"];
-const PLAYER_COLORS = ['#00d2ff', '#ff3e3e', '#bcff00', '#ff00ff']; 
-const RANK_COLORS = { 'E': '#00ff00', 'D': '#99ff00', 'C': '#ffff00', 'B': '#ff9900', 'A': '#ff00ff', 'S': '#ff0000', 'Silver': '#ffffff' };
-const POWER_UPS = ['DOUBLE DAMAGE', 'GHOST WALK', 'NETHER SWAP'];
-const corners = [{x:0,y:0}, {x:14,y:0}, {x:0,y:14}, {x:14,y:14}];
-
-// --- RANKING HELPERS ---
-function getFullRankLabel(val) {
-    if (val >= 1000) return "Higher S-Rank";
-    if (val >= 901) return "Lower S-Rank";
-    if (val >= 801) return "Higher A-Rank";
-    if (val >= 701) return "Lower A-Rank";
-    if (val >= 601) return "Higher B-Rank";
-    if (val >= 501) return "Lower B-Rank";
-    if (val >= 401) return "Higher C-Rank";
-    if (val >= 301) return "Lower C-Rank";
-    if (val >= 201) return "Higher D-Rank";
-    if (val >= 101) return "Lower D-Rank";
-    if (val >= 51) return "Higher E-Rank";
-    return "Lower E-Rank";
-}
-
-function getDisplayRank(mana) {
-    if (mana >= 901) return "Rank S";
-    if (mana >= 701) return "Rank A";
-    if (mana >= 501) return "Rank B";
-    if (mana >= 301) return "Rank C";
-    if (mana >= 101) return "Rank D";
-    return "Rank E"; 
-}
-
-function getSimpleRank(val) {
-    if (val >= 901) return 'S';
-    if (val >= 701) return 'A';
-    if (val >= 501) return 'B';
-    if (val >= 301) return 'C';
-    if (val >= 101) return 'D';
-    return 'E';
-}
-
-async function getWorldRankDisplay(username) {
-    const { data } = await supabase.from('Hunters').select('username, hunterpoints').order('hunterpoints', { ascending: false });
-    if (!data) return { label: '#??', color: '#888' };
-    const index = data.findIndex(u => u.username === username);
-    if (index === -1) return { label: '#??', color: '#888' };
-    const rank = index + 1;
-    let color = (rank <= 3) ? '#ffcc00' : ((rank <= 10) ? '#ff003c' : '#fff'); 
-    return { label: `#${rank}`, color: color };
-}
-
-async function broadcastWorldRankings() {
-    const { data } = await supabase.from('Hunters').select('username, hunterpoints, wins, losses').order('hunterpoints', { ascending: false }).limit(100);
-    if (data) {
-        const formatted = data.map(r => ({ ...r, rankLabel: getFullRankLabel(r.hunterpoints), isAdmin: r.username === ADMIN_NAME }));
-        io.emit('updateWorldRankings', formatted);
-    }
-}
-
-async function sendProfileUpdate(socket, username) {
-    const { data: user } = await supabase.from('Hunters').select('*').eq('username', username).maybeSingle();
-    if (user && socket) {
-        const { count } = await supabase.from('Hunters').select('*', { count: 'exact', head: true }).gt('hunterpoints', user.hunterpoints);
-        const letter = getSimpleRank(user.hunterpoints);
-        socket.emit('authSuccess', { 
-            username: user.username, mana: user.hunterpoints, rank: getFullRankLabel(user.hunterpoints), color: RANK_COLORS[letter],
-            wins: user.wins || 0, losses: user.losses || 0, worldRank: (count || 0) + 1, isAdmin: (user.username === ADMIN_NAME)
-        });
-    }
-}
-
-// --- GAME LOGIC HELPERS ---
-async function recordLoss(username, winnerMana, isQuit = false) {
-    const { data: u } = await supabase.from('Hunters').select('hunterpoints, losses').eq('username', username).maybeSingle();
-    if (u) {
-        let deduction = 20; 
-        if (!isQuit) {
-            const mpStr = winnerMana.toString();
-            deduction = (winnerMana >= 10000) ? parseInt(mpStr.substring(0, 2)) : parseInt(mpStr.substring(0, 1));
-        }
-        await supabase.from('Hunters').update({ hunterpoints: Math.max(0, u.hunterpoints - Math.max(1, deduction)), losses: (u.losses || 0) + 1 }).eq('username', username);
-    }
-}
-
-async function processWin(room, winnerName) {
-    const { data: u } = await supabase.from('Hunters').select('hunterpoints, wins').eq('username', winnerName).maybeSingle();
-    if (u) await supabase.from('Hunters').update({ hunterpoints: u.hunterpoints + 20, wins: (u.wins || 0) + 1 }).eq('username', winnerName);
-    
-    io.to(room.id).emit('victoryEvent', { winner: winnerName });
-    room.active = false;
-    broadcastWorldRankings();
-    
-    const winnerPlayer = room.players.find(p => p.name === winnerName);
-    if(winnerPlayer) {
-        const socket = io.sockets.sockets.get(winnerPlayer.id);
-        if(socket) sendProfileUpdate(socket, winnerName);
-    }
-
-    setTimeout(() => { 
-        io.to(room.id).emit('returnToProfile'); 
-        if(rooms[room.id]) delete rooms[room.id];
-        syncAllGates();
-    }, 6000); 
-}
-
-function syncAllGates() {
-    const list = Object.values(rooms).filter(r => r.isOnline && !r.active).map(r => ({ id: r.id, name: r.name, count: r.players.length }));
-    io.emit('updateGateList', list);
-}
-
-function broadcastGameState(room) { 
-    if (!room) return;
-    const sanitizedPlayers = room.players.map(p => ({
-        ...p,
-        rankLabel: getFullRankLabel(p.mana), 
-        displayRank: getDisplayRank(p.mana)
-    }));
-    io.to(room.id).emit('gameStateUpdate', { ...room, players: sanitizedPlayers });
-}
-
-function spawnGate(room) {
-    let x, y, tries = 0;
-    do { x = Math.floor(Math.random() * 15); y = Math.floor(Math.random() * 15); tries++; } 
-    while ((room.players.some(p => p.alive && p.x === x && p.y === y) || room.world[`${x}-${y}`]) && tries < 100);
-    
-    const cycle = Math.floor(room.globalTurns / room.players.length);
-    let pool = (cycle >= 6) ? ['B', 'A', 'S'] : (cycle >= 3 ? ['C', 'B'] : ['E', 'D']);
-    const rank = pool[Math.floor(Math.random() * pool.length)];
-    const manaMap = { 'E': [0, 100], 'D': [101, 300], 'C': [301, 500], 'B': [501, 700], 'A': [701, 900], 'S': [901, 1200] };
-    const range = manaMap[rank];
-    room.world[`${x}-${y}`] = { rank, color: RANK_COLORS[rank], mana: Math.floor(Math.random() * (range[1] - range[0] + 1)) + range[0] };
-}
-
-// --- BATTLE ENGINE ---
-async function resolveConflict(room, p) {
-    const coord = `${p.x}-${p.y}`;
-    const opponent = room.players.find(o => o.id !== p.id && o.alive && o.x === p.x && o.y === p.y);
-    
-    if (opponent) {
-        io.to(room.id).emit('battleStart', { hunter: p.name, hunterMana: p.mana, hunterColor: p.color, hunterPowerUp: p.powerUp, target: opponent.name, targetMana: opponent.mana, targetRank: `MP: ${opponent.mana}`, targetColor: opponent.color });
-        await new Promise(r => setTimeout(r, 6000));
-        if (!rooms[room.id]) return; // Room closed during battle
-
-        if (p.mana >= opponent.mana) { p.mana += opponent.mana; opponent.alive = false; if (!opponent.isAI && room.isOnline) await recordLoss(opponent.name, p.mana); }
-        else { opponent.mana += p.mana; p.alive = false; if (!p.isAI && room.isOnline) await recordLoss(p.name, opponent.mana); }
-        io.to(room.id).emit('battleEnd');
-        return;
-    }
-
-    if (room.world[coord]) {
-        const gate = room.world[coord];
-        io.to(room.id).emit('battleStart', { hunter: p.name, hunterMana: p.mana, hunterColor: p.color, hunterPowerUp: p.powerUp, target: `RANK ${gate.rank}`, targetMana: gate.mana, targetRank: `MP: ${gate.mana}`, targetColor: gate.color });
-        await new Promise(r => setTimeout(r, 6000));
-        if (!rooms[room.id]) return;
-
-        if (p.mana >= gate.mana) {
-            p.mana += gate.mana; delete room.world[coord];
-            if (gate.rank === 'Silver') return await processWin(room, p.name);
-        } else {
-            p.alive = false; if (!p.isAI && room.isOnline) await recordLoss(p.name, gate.mana);
-        }
-        io.to(room.id).emit('battleEnd');
-    }
-}
-
-function advanceTurn(room) {
-    if (!rooms[room.id] || !room.active) return;
-    
-    room.globalTurns++;
-    if (room.globalTurns % (room.players.length * 3) === 0) for(let i=0; i<3; i++) spawnGate(room);
-    
-    let attempts = 0;
-    do { room.turn = (room.turn + 1) % room.players.length; attempts++; } 
-    while (!room.players[room.turn].alive && attempts < 10);
-    
-    const nextP = room.players[room.turn];
-
-    const aliveHumans = room.players.filter(pl => pl.alive && !pl.isAI);
-    if (aliveHumans.length === 0 && room.active) {
-        room.active = false;
-        io.to(room.id).emit('announcement', "QUEST FAILED: NO HUNTERS REMAIN.");
-        setTimeout(() => { if(rooms[room.id]) { io.to(room.id).emit('returnToProfile'); delete rooms[room.id]; syncAllGates(); } }, 4000);
-        return;
-    }
-
-    if (nextP.isAI && nextP.alive) {
-        setTimeout(async () => {
-            if (!rooms[room.id]) return;
-            let tx = nextP.x, ty = nextP.y;
-            if (room.mode === 'Monarch') {
-                let targets = [];
-                Object.keys(room.world).forEach(c => targets.push({x: parseInt(c.split('-')[0]), y: parseInt(c.split('-')[1])}));
-                room.players.forEach(pl => { if(pl.alive && pl.id !== nextP.id) targets.push({x: pl.x, y: pl.y}); });
-                targets.sort((a,b) => (Math.abs(nextP.x-a.x)+Math.abs(nextP.y-a.y)) - (Math.abs(nextP.x-b.x)+Math.abs(nextP.y-b.y)));
-                if(targets[0]) {
-                    if (targets[0].x > nextP.x) tx++; else if (targets[0].x < nextP.x) tx--;
-                    if (targets[0].y > nextP.y) ty++; else if (targets[0].y < nextP.y) ty--;
-                }
-            } else { tx += (Math.random()>0.5?1:-1); ty += (Math.random()>0.5?1:-1); }
-            nextP.x = Math.max(0, Math.min(14, tx)); nextP.y = Math.max(0, Math.min(14, ty));
-            await resolveConflict(room, nextP);
-            advanceTurn(room);
-        }, 800);
-    }
-    broadcastGameState(room);
-}
-
-async function handleExit(socket) {
-    const name = Object.keys(connectedUsers).find(k => connectedUsers[k] === socket.id);
-    if (name) delete connectedUsers[name];
-
-    const room = Object.values(rooms).find(r => r.players.some(p => p.id === socket.id));
-    if (room) {
-        const p = room.players.find(pl => pl.id === socket.id);
-        if (p) {
-            p.quit = true; p.alive = false;
-            if (room.isOnline) await recordLoss(p.name, 0, true);
-        }
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>SOLO LEVELING BOARD GAME</title>
+    <script src="/socket.io/socket.io.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Exo+2:ital,wght@1,900&family=Orbitron:wght@400;900&display=swap" rel="stylesheet">
+    <style>
+        :root { --sys-blue: #00d2ff; --sys-red: #ff003c; --sys-gold: #ffcc00; --sys-silver: #c0c0c0; --sys-green: #00ff00; }
+        body { background: #000; color: white; font-family: 'Exo 2', sans-serif; margin: 0; overflow: hidden; }
+        h1, h2, h3 { font-family: 'Orbitron'; font-style: italic; color: var(--sys-blue); text-shadow: 0 0 10px var(--sys-blue); }
+        .screen { display: none; flex-direction: column; align-items: center; justify-content: center; height: 100vh; width: 100vw; position: absolute; }
+        .active { display: flex !important; }
+        .sys-btn { background: #000; border: 2px solid var(--sys-blue); color: var(--sys-blue); padding: 10px 40px; font-family: 'Orbitron'; cursor: pointer; margin: 10px; font-weight: 900; clip-path: polygon(15% 0, 100% 0, 85% 100%, 0 100%); width: 250px; text-transform: uppercase; transition: 0.2s; }
+        .sys-btn:hover { background: var(--sys-blue); color: #000; }
+        .sys-input { padding: 15px; background: #000; border: 1px solid var(--sys-blue); color: #fff; width: 300px; margin: 10px; font-family: 'Orbitron'; outline: none; }
         
-        const humansLeft = room.players.filter(pl => !pl.quit && !pl.isAI);
-        if (humansLeft.length === 0) {
-            delete rooms[room.id];
-        } else if (humansLeft.length === 1 && room.active && room.isOnline) {
-            await processWin(room, humansLeft[0].name);
-        } else {
-            broadcastGameState(room);
-        }
-        syncAllGates();
-        broadcastWorldRankings();
-    }
-}
+        .admin-glow { color: var(--sys-gold) !important; text-shadow: 0 0 15px var(--sys-gold), 0 0 5px #fff; font-weight: 900; animation: admin-pulse 2s infinite ease-in-out; }
+        @keyframes admin-pulse { 0%, 100% { filter: brightness(1); } 50% { filter: brightness(1.5) drop-shadow(0 0 10px var(--sys-gold)); } }
+        
+        #game-board { display: grid; grid-template-columns: repeat(15, 42px); gap: 2px; background: #111; border: 4px solid var(--sys-blue); }
+        .cell { width: 42px; height: 42px; background: #000; position: relative; border: 0.5px solid #1a1a1a; }
+        .valid-move { box-shadow: inset 0 0 0 3px var(--sys-blue); cursor: pointer; z-index: 5; }
+        
+        .humanoid { position: absolute; bottom: 5px; left: 50%; transform: translateX(-50%); width: 24px; height: 30px; z-index: 10; pointer-events: none; }
+        .h-head { width: 10px; height: 10px; border-radius: 50%; border: 1px solid white; margin: 0 auto; }
+        .h-body { width: 20px; height: 15px; border: 1px solid white; border-radius: 4px 4px 0 0; }
+        .name-tag { position: absolute; top: -22px; left: 50%; transform: translateX(-50%); font-size: 10px; white-space: nowrap; font-weight: 900; background: #000; border: 1px solid #444; padding: 1px 4px; display: flex; flex-direction: column; align-items: center; z-index: 20; }
+        
+        .hud-left { width: 280px; background: rgba(0,0,0,0.9); border-right: 2px solid var(--sys-blue); padding: 15px; display: flex; flex-direction: column; height: 650px; overflow-y: auto; }
+        .sidebar { width: 350px; border: 2px solid var(--sys-blue); background: #000; padding: 15px; height: 650px; display: flex; flex-direction: column; }
+        
+        #vs-panel { display: none; background: rgba(20,0,0,0.9); border: 2px solid var(--sys-red); padding: 10px; margin-bottom: 15px; flex-direction: column; align-items: center; box-shadow: 0 0 15px var(--sys-red); width: 100%; box-sizing: border-box; }
+        .v-fill { height: 6px; background: var(--sys-red); width: 0%; transition: 5s linear; margin-top: 10px; }
+        
+        #global-chat-container { width: 400px; height: 200px; border: 2px solid var(--sys-blue); background: rgba(0,0,0,0.8); display: none; flex-direction: column; margin-top: 10px; }
+        #chat-messages { flex-grow: 1; overflow-y: auto; padding: 5px; font-size: 12px; }
+        .chat-input-row { display: flex; border-top: 1px solid var(--sys-blue); }
+        .chat-input-row input { flex-grow: 1; background: #000; border: none; color: white; padding: 10px; outline: none; }
+        .chat-input-row button { background: var(--sys-blue); border: none; padding: 5px 15px; cursor: pointer; font-weight: 900; }
+        
+        .gate-item { padding: 15px; border-bottom: 1px solid #333; display: flex; justify-content: space-between; align-items: center; cursor: pointer; transition: 0.2s; }
+        .gate-item:hover { background: rgba(0, 210, 255, 0.1); }
+        #victory-screen { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.95); z-index: 10000; flex-direction: column; align-items: center; justify-content: center; }
+    </style>
+</head>
+<body>
+    <audio id="bgm" loop></audio>
 
-// --- SOCKET CONNECTION ---
-io.on('connection', (socket) => {
-    socket.on('adminAction', async (data) => {
-        if (socket.id !== adminSocketId) return;
-        if (data.action === 'kick') {
-            const tSocketId = connectedUsers[data.target];
-            if (tSocketId) {
-                const tSocket = io.sockets.sockets.get(tSocketId);
-                if (tSocket) {
-                    tSocket.emit('authError', "SYSTEM: FORCED LOGOUT BY ADMIN.");
-                    await handleExit(tSocket);
-                    setTimeout(() => tSocket.disconnect(true), 100);
+    <div id="victory-screen">
+        <h1 style="font-size: 4rem; color: var(--sys-gold);">QUEST COMPLETE</h1>
+        <h2 id="winner-name" style="font-size: 2rem;">---</h2>
+        <div id="mp-deduction-info" style="color: var(--sys-red); font-family: 'Orbitron'; margin-bottom: 10px;"></div>
+        <p id="return-timer">Returning to Profile in 5...</p>
+    </div>
+
+    <div id="global-chat-container">
+        <div id="chat-messages"></div>
+        <div class="chat-input-row">
+            <input type="text" id="chat-input" placeholder="SYSTEM MESSAGE..." onkeydown="if(event.key==='Enter') sendChatMessage()">
+            <button onclick="sendChatMessage()">SEND</button>
+        </div>
+    </div>
+
+    <div id="screen-auth" class="screen active">
+        <h1 style="font-size: 4rem; letter-spacing: 15px;">SYSTEM</h1>
+        <div id="auth-msg" style="color:var(--sys-red); font-size:12px; height:20px;"></div>
+        <input type="text" id="u" class="sys-input" placeholder="HUNTER ID">
+        <input type="password" id="p" class="sys-input" placeholder="ACCESS CODE">
+        <button class="sys-btn" onclick="auth('login')">LOGIN</button>
+        <button class="sys-btn" style="border-color:#444;" onclick="auth('signup')">REGISTER</button>
+    </div>
+
+    <div id="screen-menu" class="screen">
+        <div style="position:absolute; right:40px; top:20px; text-align:right;">
+            <h1 id="st-name" style="font-size: 2rem; margin:0;">---</h1>
+            <div id="st-world-rank" style="color: var(--sys-gold);">WORLD RANK: #--</div>
+            <div id="st-rank" style="font-size: 1.5rem; font-weight: 900;">---</div>
+            <div id="st-mp" style="color:var(--sys-blue);">HuP: ---</div>
+            
+            <div id="admin-panel" style="display:none; flex-direction:column; gap:5px; margin-top:10px; border:2px solid var(--sys-red); padding:10px;">
+                <h3 style="color:var(--sys-red); margin:0; font-size:12px;">ADMIN CONTROLS</h3>
+                <input id="admin-target" class="sys-input" placeholder="PLAYER NAME" style="width:120px; height:15px; font-size:10px;">
+                <button class="sys-btn" style="width:145px; height:30px; padding:0; font-size:10px;" onclick="doAdmin('kick')">KICK</button>
+                <button class="sys-btn" style="width:145px; height:30px; padding:0; font-size:10px; border-color:var(--sys-gold);" onclick="doAdmin('spectate')">WATCH</button>
+                <input id="admin-broadcast" class="sys-input" placeholder="GLOBAL MSG" style="width:120px; height:15px; font-size:10px;">
+                <button class="sys-btn" style="width:145px; height:30px; padding:0; font-size:10px;" onclick="doAdmin('broadcast')">SEND</button>
+            </div>
+        </div>
+
+        <div id="menu-chat-anchor" style="height: 250px; width: 400px; margin-top: 10px;"></div>
+        <button class="sys-btn" onclick="showScreen('screen-difficulty')">SINGLE PLAYER</button>
+        <button class="sys-btn" onclick="openOnlineLobby()">MULTIPLAYER</button>
+        <button class="sys-btn" style="border-color:#555;" onclick="doLogout()">LOGOUT</button>
+    </div>
+
+    <div id="screen-lobby" class="screen">
+        <h2>GATE SELECTION</h2>
+        <div id="gate-list" style="width: 600px; height: 300px; border: 2px solid var(--sys-blue); overflow-y: auto; background: rgba(0,0,0,0.8);"></div>
+        <div id="lobby-chat-anchor" style="width: 400px; height: 200px; margin-top:10px;"></div>
+        <button class="sys-btn" onclick="showScreen('screen-menu')">BACK</button>
+    </div>
+
+    <div id="screen-game" class="screen" style="flex-direction: row;">
+        <div class="hud-left">
+            <h3 id="turn-txt">>> SYSTEM TURN</h3>
+            <div id="party-list"></div>
+            <div id="game-chat-anchor" style="height: 300px; width: 100%; margin-top:20px;"></div>
+        </div>
+        <div style="display:flex; flex-direction: column; align-items: center; padding: 20px;">
+            <div id="game-board"></div>
+            <div id="vs-panel">
+                <span id="vs-data"></span>
+                <div id="skill-area"></div>
+                <div style="width:100%; height:4px; background:#111;"><div class="v-fill" id="vs-fill"></div></div>
+            </div>
+            <div id="announcement-board" style="width:100%; background:#050505; min-height:50px; font-size:12px; margin-top:10px; padding:5px; border:1px solid #222;"></div>
+            <button class="sys-btn" style="width:100%;" onclick="quitAction()">QUIT QUEST</button>
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+        let myHunter = null;
+        let myRoomID = 'global';
+        let currentBGM = "";
+
+        // AUTH & NAVIGATION
+        function auth(type) {
+            const u = document.getElementById('u').value;
+            const p = document.getElementById('p').value;
+            if(!u || !p) return;
+            socket.emit('authRequest', { type, u, p });
+        }
+
+        socket.on('authSuccess', (d) => {
+            myHunter = d;
+            document.getElementById('st-name').innerText = d.username;
+            document.getElementById('st-rank').innerText = d.rank;
+            document.getElementById('st-mp').innerText = `HuP: ${d.mana}`;
+            document.getElementById('admin-panel').style.display = d.isAdmin ? 'flex' : 'none';
+            showScreen('screen-menu');
+        });
+
+        socket.on('authError', (msg) => {
+            document.getElementById('auth-msg').innerText = msg;
+            if(msg.includes("LOGOUT")) location.reload();
+        });
+
+        function showScreen(id) {
+            document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+            document.getElementById(id).classList.add('active');
+            if(id === 'screen-menu') moveChat('menu-chat-anchor');
+            if(id === 'screen-lobby') moveChat('lobby-chat-anchor');
+            if(id === 'screen-game') moveChat('game-chat-anchor');
+        }
+
+        // CHAT SYSTEM
+        function moveChat(anchorId) {
+            const chat = document.getElementById('global-chat-container');
+            chat.style.display = 'flex';
+            document.getElementById(anchorId).appendChild(chat);
+        }
+
+        function sendChatMessage() {
+            const input = document.getElementById('chat-input');
+            if (input.value.trim() !== "" && myHunter) {
+                socket.emit('sendMessage', { message: input.value, senderName: myHunter.username, roomId: myRoomID });
+                input.value = "";
+            }
+        }
+
+        socket.on('receiveMessage', (data) => {
+            const chatBox = document.getElementById('chat-messages');
+            const msg = document.createElement('div');
+            if(data.isAdmin) msg.className = "admin-chat-msg";
+            msg.innerHTML = `<b>[${data.rank}] ${data.sender}:</b> ${data.text}`;
+            chatBox.appendChild(msg);
+            chatBox.scrollTop = chatBox.scrollHeight;
+        });
+
+        // GAME ACTIONS
+        function quitAction() { socket.emit('quitGame'); }
+        function startAI(diff) { socket.emit('startSoloAI', { user: myHunter.username, diff }); }
+        function openOnlineLobby() { showScreen('screen-lobby'); socket.emit('requestGateList'); }
+        
+        socket.on('gameStart', (data) => {
+            myRoomID = data.roomId;
+            showScreen('screen-game');
+        });
+
+        socket.on('gameStateUpdate', (s) => {
+            const board = document.getElementById('game-board');
+            board.innerHTML = "";
+            const me = s.players.find(p => p.id === socket.id) || { x: -1, y: -1 };
+            const isTurn = s.players[s.turn].id === socket.id;
+
+            document.getElementById('turn-txt').innerText = isTurn ? ">> YOUR MOVE" : `>> ${s.players[s.turn].name.toUpperCase()} ACTING`;
+            
+            // Draw board
+            for(let y=0; y<15; y++) {
+                for(let x=0; x<15; x++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'cell';
+                    if(s.world[`${x}-${y}`]) cell.style.backgroundColor = s.world[`${x}-${y}`].color;
+                    
+                    const dist = Math.abs(me.x - x) + Math.abs(me.y - y);
+                    if(isTurn && dist === 1) {
+                        cell.classList.add('valid-move');
+                        cell.onclick = () => socket.emit('playerAction', { tx: x, ty: y });
+                    }
+                    
+                    s.players.forEach(p => {
+                        if(p.alive && p.x === x && p.y === y) {
+                            const h = document.createElement('div');
+                            h.className = 'humanoid';
+                            h.innerHTML = `<div class="name-tag">${p.name}</div><div class="h-head" style="background:${p.color}"></div><div class="h-body" style="background:${p.color}"></div>`;
+                            cell.appendChild(h);
+                        }
+                    });
+                    board.appendChild(cell);
                 }
             }
+        });
+
+        // BATTLE & ANNOUNCEMENTS
+        socket.on('battleStart', (data) => {
+            document.getElementById('vs-panel').style.display = 'flex';
+            document.getElementById('vs-fill').style.transition = 'none';
+            document.getElementById('vs-fill').style.width = '0%';
+            void document.getElementById('vs-fill').offsetWidth;
+            document.getElementById('vs-fill').style.transition = '6s linear';
+            document.getElementById('vs-fill').style.width = '100%';
+            document.getElementById('vs-data').innerHTML = `${data.hunter} VS ${data.target}`;
+        });
+
+        socket.on('battleEnd', () => { document.getElementById('vs-panel').style.display = 'none'; });
+        socket.on('announcement', (msg) => {
+            const board = document.getElementById('announcement-board');
+            board.innerHTML = `<div style="color:var(--sys-gold)">[SYSTEM]: ${msg}</div>` + board.innerHTML;
+        });
+
+        socket.on('returnToProfile', () => { myRoomID = 'global'; showScreen('screen-menu'); });
+
+        function doAdmin(action) {
+            const target = document.getElementById('admin-target').value;
+            const msg = document.getElementById('admin-broadcast').value;
+            if(action === 'kick') socket.emit('adminAction', { action: 'kick', target });
+            if(action === 'spectate') socket.emit('adminAction', { action: 'spectate', targetName: target });
+            if(action === 'broadcast') socket.emit('adminAction', { action: 'broadcast', message: msg });
         }
-        if (data.action === 'broadcast') {
-            const msg = { sender: 'SYSTEM ADMIN', text: data.message, rank: 'ADMIN', timestamp: new Date().toLocaleTimeString(), isAdmin: true };
-            recentAdminMessages.push(msg);
-            io.emit('receiveMessage', msg);
-        }
-        if (data.action === 'spectate') {
-            const room = Object.values(rooms).find(r => r.players.some(p => p.name === data.targetName));
-            if (room) { 
-                socket.join(room.id); 
-                socket.emit('gameStart', { roomId: room.id }); 
-                broadcastGameState(room); // Immediate sync
-            }
-        }
-    });
-
-    socket.on('authRequest', async (data) => {
-        const { data: user } = await supabase.from('Hunters').select('*').eq('username', data.u).eq('password', data.p).maybeSingle();
-        if (user) {
-            connectedUsers[user.username] = socket.id;
-            if (user.username === ADMIN_NAME) adminSocketId = socket.id;
-            sendProfileUpdate(socket, user.username);
-            syncAllGates();
-            broadcastWorldRankings();
-        } else socket.emit('authError', "INVALID ACCESS.");
-    });
-
-    socket.on('joinChatRoom', (roomId) => {
-        socket.rooms.forEach(r => { if(r !== socket.id) socket.leave(r); });
-        socket.join(roomId);
-        socket.emit('joinedRoom', roomId);
-        recentAdminMessages.slice(-5).forEach(m => socket.emit('receiveMessage', m));
-    });
-
-    socket.on('sendMessage', async (data) => {
-        const { data: u } = await supabase.from('Hunters').select('hunterpoints').eq('username', data.senderName).maybeSingle();
-        const msg = { sender: data.senderName, text: data.message, rank: getDisplayRank(u?.hunterpoints || 0), timestamp: new Date().toLocaleTimeString(), isAdmin: data.senderName === ADMIN_NAME };
-        if (!data.roomId || data.roomId === 'global' || data.roomId === 'null') io.emit('receiveMessage', msg);
-        else io.to(data.roomId).emit('receiveMessage', msg);
-    });
-
-    socket.on('createGate', async (data) => {
-        const id = `gate_${Date.now()}`;
-        const wr = await getWorldRankDisplay(data.host);
-        rooms[id] = { id, name: data.name, isOnline: true, active: false, turn: 0, globalTurns: 0, players: [{ id: socket.id, name: data.host, x: 0, y: 0, mana: 150, worldsRankLabel: wr.label, worldsRankColor: wr.color, alive: true, confirmed: false, color: PLAYER_COLORS[0], isAI: false, quit: false, powerUp: null, isAdmin: data.host === ADMIN_NAME }], world: {} };
-        socket.join(id);
-        io.to(id).emit('waitingRoomUpdate', rooms[id]);
-        syncAllGates();
-    });
-
-    socket.on('joinGate', async (data) => {
-        const room = rooms[data.gateID];
-        if (room && room.players.length < 4) {
-            const wr = await getWorldRankDisplay(data.user);
-            const idx = room.players.length;
-            room.players.push({ id: socket.id, name: data.user, x: corners[idx].x, y: corners[idx].y, mana: 150, worldsRankLabel: wr.label, worldsRankColor: wr.color, alive: true, confirmed: false, color: PLAYER_COLORS[idx], isAI: false, quit: false, powerUp: null, isAdmin: data.user === ADMIN_NAME });
-            socket.join(data.gateID);
-            io.to(data.gateID).emit('waitingRoomUpdate', room);
-            syncAllGates();
-        }
-    });
-
-    socket.on('playerConfirm', (data) => {
-        const room = rooms[data.gateID];
-        if (room) {
-            const p = room.players.find(pl => pl.id === socket.id);
-            if(p) p.confirmed = true;
-            if (room.players.length >= 2 && room.players.every(pl => pl.confirmed)) {
-                room.active = true; for(let i=0; i<5; i++) spawnGate(room);
-                io.to(room.id).emit('gameStart', { roomId: room.id });
-                advanceTurn(room);
-                syncAllGates();
-            } else io.to(room.id).emit('waitingRoomUpdate', room);
-        }
-    });
-
-    socket.on('startSoloAI', async (data) => {
-        const id = `solo_${socket.id}_${Date.now()}`;
-        rooms[id] = {
-            id, active: true, turn: 0, mode: data.diff, globalTurns: 0, isOnline: false,
-            players: [
-                { id: socket.id, name: data.user, x: 0, y: 0, mana: 150, alive: true, isAI: false, color: PLAYER_COLORS[0], powerUp: null, isAdmin: data.user === ADMIN_NAME },
-                { id: 'ai1', name: AI_NAMES[1], x: 14, y: 0, mana: 200, alive: true, isAI: true, color: PLAYER_COLORS[1] },
-                { id: 'ai2', name: AI_NAMES[2], x: 0, y: 14, mana: 200, alive: true, isAI: true, color: PLAYER_COLORS[2] },
-                { id: 'ai3', name: AI_NAMES[3], x: 14, y: 14, mana: 200, alive: true, isAI: true, color: PLAYER_COLORS[3] }
-            ], world: {}
-        };
-        for(let i=0; i<5; i++) spawnGate(rooms[id]);
-        socket.join(id);
-        socket.emit('gameStart', { roomId: id });
-        advanceTurn(rooms[id]);
-    });
-
-    socket.on('playerAction', async (data) => {
-        const room = Object.values(rooms).find(r => r.players.some(p => p.id === socket.id));
-        if (!room || !room.active) return;
-        const p = room.players[room.turn];
-        if (!p || p.id !== socket.id) return;
-        p.x = data.tx; p.y = data.ty;
-        await resolveConflict(room, p);
-        if(rooms[room.id]) advanceTurn(room);
-    });
-
-    socket.on('quitGame', () => handleExit(socket));
-    socket.on('disconnect', () => handleExit(socket));
-});
-
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`SYSTEM: Server active on ${PORT}`));
+    </script>
+</body>
+</html>
