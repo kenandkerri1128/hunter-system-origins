@@ -230,15 +230,16 @@
 
             if(id === 'screen-menu' && myHunter) { 
                 socket.emit('requestWorldRankings');
+                // Use original credentials stored during session
                 socket.emit('authRequest', {type:'login', u:myHunter.username, p:currentPass}); 
                 myRoomID = null;
-                clearChat(); // Clear when returning to menu
+                clearChat(); 
             }
         }
         
         function auth(type) { 
-            const u = document.getElementById('u').value;
-            const p = document.getElementById('p').value;
+            const u = document.getElementById('u').value.trim();
+            const p = document.getElementById('p').value.trim();
             if(!u || !p) return alert("ENTER HUNTER CREDENTIALS");
             currentPass = p;
             socket.emit('authRequest', { type, u, p }); 
@@ -312,7 +313,7 @@
         });
 
         socket.on('waitingRoomUpdate', (room) => {
-            if (myRoomID !== room.id) clearChat(); // Wipe lobby chat when entering room
+            if (myRoomID !== room.id) clearChat(); 
             showScreen('screen-waiting');
             myRoomID = room.id;
             document.getElementById('wait-slots').innerHTML = room.players.map(p => {
@@ -339,7 +340,7 @@
         }
 
         socket.on('gameStart', () => { 
-            clearChat(); // Wipe waiting room chat when game starts
+            clearChat(); 
             resetGameUI(); 
             showScreen('screen-game'); 
         });
