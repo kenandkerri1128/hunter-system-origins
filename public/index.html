@@ -15,6 +15,12 @@
         .sys-btn:hover { background: var(--sys-blue); color: #000; }
         .sys-input { padding: 15px; background: #000; border: 1px solid var(--sys-blue); color: #fff; width: 300px; margin: 10px; font-family: 'Orbitron'; outline: none; }
         
+        /* Admin Kei Effects */
+        .admin-glow { color: var(--sys-gold) !important; text-shadow: 0 0 15px var(--sys-gold), 0 0 5px #fff; font-weight: 900; animation: admin-pulse 2s infinite ease-in-out; }
+        @keyframes admin-pulse { 0%, 100% { filter: brightness(1); } 50% { filter: brightness(1.5) drop-shadow(0 0 10px var(--sys-gold)); } }
+        
+        .admin-chat-msg { background: rgba(255, 204, 0, 0.1); border-left: 3px solid var(--sys-gold); padding-left: 5px; margin: 2px 0; }
+
         /* Game Board */
         #game-board { display: grid; grid-template-columns: repeat(15, 42px); gap: 2px; background: #111; border: 4px solid var(--sys-blue); }
         .cell { width: 42px; height: 42px; background: #000; position: relative; border: 0.5px solid #1a1a1a; }
@@ -32,7 +38,6 @@
         .sidebar { width: 350px; border: 2px solid var(--sys-blue); background: #000; padding: 15px; height: 650px; display: flex; flex-direction: column; }
         .party-member { font-size: 16px; font-weight: 900; margin-bottom: 8px; border-bottom: 1px solid #222; padding: 5px 0; }
         
-        /* VS PANEL - Embedded in Sidebar */
         #vs-panel { display: none; background: rgba(20,0,0,0.9); border: 2px solid var(--sys-red); padding: 10px; margin-bottom: 15px; flex-direction: column; align-items: center; box-shadow: 0 0 15px var(--sys-red); width: 100%; box-sizing: border-box; }
         .v-fill { height: 6px; background: var(--sys-red); width: 0%; transition: 5s linear; margin-top: 10px; }
         
@@ -48,7 +53,6 @@
         .chat-input-row input { flex-grow: 1; background: #000; border: none; color: white; padding: 10px; outline: none; }
         .chat-input-row button { background: var(--sys-blue); border: none; padding: 5px 15px; cursor: pointer; font-weight: 900; }
         
-        /* Lobby Styles */
         .gate-item { padding: 15px; border-bottom: 1px solid #333; display: flex; justify-content: space-between; align-items: center; cursor: pointer; transition: 0.2s; }
         .gate-item:hover { background: rgba(0, 210, 255, 0.1); }
     </style>
@@ -76,7 +80,6 @@
     <div id="screen-auth" class="screen active">
         <h1 style="font-size: 4rem; letter-spacing: 15px;">SYSTEM</h1>
         <div id="auth-msg" style="color:var(--sys-red); font-family: 'Orbitron'; font-size:12px; height:20px; margin-bottom:5px;"></div>
-        
         <input type="text" id="u" class="sys-input" placeholder="HUNTER ID">
         <input type="password" id="p" class="sys-input" placeholder="ACCESS CODE">
         <button class="sys-btn" onclick="auth('login')">LOGIN</button>
@@ -90,6 +93,17 @@
             <div id="st-stats" style="font-size: 1rem; color: #aaa; margin-bottom: 5px;">WINS: 0 | LOSSES: 0</div>
             <div id="st-rank" style="font-size: 1.8rem; font-weight: 900; margin:0;">---</div>
             <div id="st-mp" style="font-size: 1.2rem; margin:0; color:var(--sys-blue);">HuP: ---</div>
+            
+            <div id="admin-panel" style="display:none; flex-direction:column; gap:5px; margin-top:15px; border:2px solid var(--sys-red); padding:10px; background:rgba(20,0,0,0.8); text-align:left;">
+                <h3 style="color:var(--sys-red); margin:0; font-size:12px;">ADMIN CONTROLS</h3>
+                <input id="admin-target" class="sys-input" placeholder="PLAYER NAME" style="width:180px; height:15px; padding:8px; font-size:10px; margin:2px 0;">
+                <div style="display:flex; gap:5px;">
+                    <button class="sys-btn" style="width:90px; height:30px; padding:0; font-size:10px; border-color:var(--sys-red);" onclick="doAdmin('kick')">KICK</button>
+                    <button class="sys-btn" style="width:90px; height:30px; padding:0; font-size:10px; border-color:var(--sys-gold);" onclick="doAdmin('spectate')">WATCH</button>
+                </div>
+                <input id="admin-broadcast" class="sys-input" placeholder="GLOBAL MESSAGE" style="width:180px; height:15px; padding:8px; font-size:10px; margin:2px 0;">
+                <button class="sys-btn" style="width:100%; height:30px; padding:0; font-size:10px;" onclick="doAdmin('broadcast')">SEND BROADCAST</button>
+            </div>
         </div>
 
         <div style="border:2px solid var(--sys-blue); width:400px; padding:20px; background:rgba(0,0,0,0.8);">
@@ -111,21 +125,17 @@
             <input type="text" id="gate-name-input" class="sys-input" placeholder="GATE NAME" style="width: 250px;">
             <button class="sys-btn" style="width:auto;" onclick="createGate()">OPEN GATE</button>
         </div>
-        
         <div style="display: flex; gap: 20px;">
             <div id="gate-list" style="width: 600px; height: 400px; border: 2px solid var(--sys-blue); margin-bottom: 20px; overflow-y: auto; background: rgba(0,0,0,0.8);"></div>
             <div id="lobby-chat-anchor" style="width: 400px; height: 400px; border: 1px solid var(--sys-blue);"></div>
         </div>
-        
         <button class="sys-btn" onclick="showScreen('screen-menu')">BACK</button>
     </div>
 
     <div id="screen-waiting" class="screen">
         <h2 id="waiting-title">WAITING FOR HUNTERS...</h2>
         <div id="waiting-list" style="width: 500px; min-height: 200px; border: 2px solid var(--sys-blue); padding: 20px; margin: 20px; background: rgba(0,0,0,0.8);"></div>
-        
         <div id="waiting-chat-anchor" style="width: 500px; height: 200px; margin-bottom: 10px;"></div>
-
         <button class="sys-btn" id="btn-ready" onclick="playerConfirm()">READY / START</button>
         <button class="sys-btn" style="border-color:#555" onclick="leaveWaitingRoom()">LEAVE</button>
     </div>
@@ -155,23 +165,19 @@
                 <div class="rank-row" style="color:#00ff00;"><span>HIGHER E</span> <span>51-100</span></div>
                 <div class="rank-row" style="color:#00ff00; opacity:0.7;"><span>LOWER E</span> <span>0-50</span></div>
             </div>
-
             <div id="game-chat-anchor" style="height: 250px; width: 100%; margin-top:20px;"></div>
         </div>
-
         <div style="display:flex; gap:20px; padding: 0 20px;">
             <div id="game-board"></div>
             <div class="sidebar">
                 <div id="vs-panel">
                     <span id="vs-title" style="color:var(--sys-red); font-weight:900;">COMBAT INITIATED</span>
                     <div id="vs-data" style="font-size: 16px; text-align: center; margin: 10px 0;"></div>
-                    <div id="skill-area" style="min-height: 40px; display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%;"></div>
+                    <div id="skill-area" style="min-height: 40px; display: flex; flex-direction: column; align-items: center; justify-content: width: 100%;"></div>
                     <div style="width:100%; height:4px; background:#111;"><div class="v-fill" id="vs-fill"></div></div>
                 </div>
-
                 <h3 id="turn-txt" style="color:var(--sys-gold); font-size: 14px;">>> SYSTEM TURN</h3>
                 <div id="party-list"></div>
-                
                 <div id="turn-counter">
                     <div id="tc-spawn-text">RANDOM GATE: <span id="tc-spawn">3</span> ROUNDS</div>
                     <div id="tc-silver-container" style="display:none; color:var(--sys-silver); font-weight: bold; border: 2px solid var(--sys-silver); padding: 5px; margin-top: 5px; background: rgba(255,255,255,0.1);">
@@ -197,7 +203,6 @@
 
         const POWER_ICONS = { 'DOUBLE DAMAGE': '⚔️', 'GHOST WALK': '👣', 'NETHER SWAP': '🌀' };
 
-        // --- AUTO LOGIN & REFRESH HANDLER ---
         window.onload = function() {
             const stored = sessionStorage.getItem('hunter_creds');
             if(stored) {
@@ -207,10 +212,9 @@
                         document.getElementById('u').value = c.u;
                         document.getElementById('p').value = c.p;
                         currentPass = c.p;
-                        // Auto-attempt login
                         socket.emit('authRequest', { type: 'login', u: c.u, p: c.p });
                     }
-                } catch(e) { console.log("Creds error"); }
+                } catch(e) {}
             }
         };
 
@@ -225,7 +229,7 @@
             if (currentBGM === track) return;
             currentBGM = track;
             audio.src = `/music/${track}`;
-            audio.play().catch(e => console.log("Interaction required"));
+            audio.play().catch(e => {});
         }
 
         function sendChatMessage() {
@@ -244,7 +248,12 @@
         socket.on('receiveMessage', (data) => {
             const chatBox = document.getElementById('chat-messages');
             const msg = document.createElement('div');
-            msg.innerHTML = `<b style="color:var(--sys-blue)">[${data.rank}] ${data.sender}:</b> ${data.text}`;
+            // Admin message styling
+            if(data.isAdmin) msg.className = "admin-chat-msg";
+            const nameStyle = data.isAdmin ? "class='admin-glow'" : "style='color:var(--sys-blue)'";
+            const crown = data.isAdmin ? "👑 " : "";
+            
+            msg.innerHTML = `<b ${nameStyle}>[${data.rank}] ${crown}${data.sender}:</b> ${data.text}`;
             chatBox.appendChild(msg);
             chatBox.scrollTop = chatBox.scrollHeight;
         });
@@ -290,28 +299,24 @@
                 if (i < 3) rankColor = 'var(--sys-gold)';
                 else if (i < 10) rankColor = 'var(--sys-red)';
 
+                const adminClass = h.isAdmin ? "class='admin-glow'" : "";
+                const crown = h.isAdmin ? "👑 " : "";
+
                 return `
                 <div style="display:flex; justify-content:space-between; padding:5px; border-bottom:1px solid #222; font-weight:900; color:${rankColor};">
-                    <span>#${i+1} ${h.username}</span>
+                    <span ${adminClass}>#${i+1} ${crown}${h.username}</span>
                     <span style="color:var(--sys-blue);">${h.hunterpoints} HuP</span>
                 </div>`;
             }).join('') || "NO HUNTERS RECORDED";
-            
-            // Note: Own World Rank is updated via authSuccess now for accuracy
         }
 
-        socket.on('updateWorldRankings', (l) => { 
-            currentWorldRankings = l; 
-            renderRankings(); 
-        });
+        socket.on('updateWorldRankings', (l) => { currentWorldRankings = l; renderRankings(); });
 
         function showScreen(id) { 
             const screens = document.querySelectorAll('.screen');
             screens.forEach(s => s.classList.remove('active')); 
             const target = document.getElementById(id);
             if(target) target.classList.add('active'); 
-            
-            // Save state (except auth/loading)
             if(id !== 'screen-auth') sessionStorage.setItem('last_screen', id);
 
             if(id === 'screen-menu') {
@@ -331,49 +336,50 @@
         function auth(type) { 
             const u = document.getElementById('u').value;
             const p = document.getElementById('p').value;
-            // Clear error msg
             document.getElementById('auth-msg').innerText = "";
-            if(!u || !p) {
-                document.getElementById('auth-msg').innerText = "ENTER ALL CREDENTIALS";
-                return;
-            }
+            if(!u || !p) { document.getElementById('auth-msg').innerText = "ENTER ALL CREDENTIALS"; return; }
             currentPass = p;
             socket.emit('authRequest', { type, u, p }); 
         }
 
-        // Handle Server Auth Errors
-        socket.on('authError', (msg) => {
-             document.getElementById('auth-msg').innerText = msg;
-        });
+        socket.on('authError', (msg) => { document.getElementById('auth-msg').innerText = msg; });
 
         socket.on('authSuccess', (d) => { 
             myHunter = d;
-            
-            // Save Creds for Refresh
             sessionStorage.setItem('hunter_creds', JSON.stringify({u: d.username, p: currentPass}));
-
             document.getElementById('st-name').innerText = d.username;
             document.getElementById('st-rank').innerText = d.rank; 
             document.getElementById('st-rank').style.color = d.color;
             document.getElementById('st-mp').innerText = `HuP: ${d.mana}`; 
             document.getElementById('st-stats').innerText = `WINS: ${d.wins || 0} | LOSSES: ${d.losses || 0}`;
-            
-            // Use Exact World Rank from Server
             document.getElementById('st-world-rank').innerText = `WORLD RANK: #${d.worldRank || '--'}`;
+            
+            // Admin Panel Check
+            document.getElementById('admin-panel').style.display = d.isAdmin ? 'flex' : 'none';
 
-            // Restore Screen Logic
             const lastScreen = sessionStorage.getItem('last_screen');
-            // If we were ingame/waiting, the server kicked us, so we must go to menu.
-            // If we were in menu or lobby, restore it.
-            if(lastScreen && lastScreen !== 'screen-game' && lastScreen !== 'screen-waiting' && lastScreen !== 'screen-auth') {
+            if(lastScreen && !['screen-game', 'screen-waiting', 'screen-auth'].includes(lastScreen)) {
                 showScreen(lastScreen);
             } else {
                 showScreen('screen-menu'); 
             }
-            
             renderRankings();
             if(d.music) playMusic(d.music);
         });
+
+        // Admin Actions
+        function doAdmin(action) {
+            const target = document.getElementById('admin-target').value;
+            const msg = document.getElementById('admin-broadcast').value;
+            const room = document.getElementById('admin-room').value; // Need an input for Room ID spectate
+            
+            if(action === 'kick') socket.emit('adminAction', { action: 'kick', target });
+            if(action === 'broadcast') socket.emit('adminAction', { action: 'broadcast', message: msg });
+            if(action === 'spectate') {
+                const roomID = document.getElementById('admin-target').value; // Reuse player input for Room ID if needed
+                socket.emit('adminAction', { action: 'spectate', roomId: roomID });
+            }
+        }
 
         function openOnlineLobby() {
             if(!myHunter) return;
@@ -392,30 +398,29 @@
             const container = document.getElementById('gate-list');
             container.innerHTML = list.map(g => 
                 `<div class="gate-item" onclick="joinGate('${g.id}')">
-                    <span>${g.name}</span>
+                    <span>${g.name} ${myHunter.isAdmin ? `<small style="color:red">[ID: ${g.id}]</small>` : ''}</span>
                     <span style="color:var(--sys-blue)">${g.count}/4 HUNTERS</span>
                 </div>`
             ).join('');
         });
 
-        function joinGate(id) {
-            socket.emit('joinGate', { gateID: id, user: myHunter.username });
-        }
+        function joinGate(id) { socket.emit('joinGate', { gateID: id, user: myHunter.username }); }
 
         socket.on('waitingRoomUpdate', (room) => {
             currentGateID = room.id;
             showScreen('screen-waiting');
             document.getElementById('waiting-title').innerText = `GATE: ${room.name}`;
-            
             if(myRoomID !== room.id) socket.emit('joinChatRoom', room.id);
 
             const container = document.getElementById('waiting-list');
-            container.innerHTML = room.players.map(p => 
-                `<div style="padding:10px; border-bottom:1px solid #333; display:flex; justify-content:space-between; color:${p.color}">
-                    <span>${p.name} <span style="color:${p.worldRankColor}; font-size:10px;">(${p.worldRankLabel || 'RANK ?'})</span></span>
+            container.innerHTML = room.players.map(p => {
+                const adminClass = p.isAdmin ? "class='admin-glow'" : "";
+                const crown = p.isAdmin ? "👑 " : "";
+                return `<div style="padding:10px; border-bottom:1px solid #333; display:flex; justify-content:space-between; color:${p.color}">
+                    <span ${adminClass}>${crown}${p.name} <span style="color:${p.worldRankColor}; font-size:10px;">(${p.worldRankLabel || 'RANK ?'})</span></span>
                     <span>${p.confirmed ? '<b style="color:var(--sys-green)">READY</b>' : 'WAITING'}</span>
-                </div>`
-            ).join('');
+                </div>`;
+            }).join('');
 
             const me = room.players.find(p => p.name === myHunter.username);
             const btn = document.getElementById('btn-ready');
@@ -430,20 +435,9 @@
             }
         });
 
-        function playerConfirm() {
-            if(currentGateID) socket.emit('playerConfirm', { gateID: currentGateID });
-        }
-
-        function leaveWaitingRoom() {
-            socket.emit('quitGame'); 
-            showScreen('screen-lobby');
-            socket.emit('requestGateList');
-        }
-
-        function startAI(diff) { 
-            resetGameUI(); 
-            socket.emit('startSoloAI', { user: myHunter.username, diff }); 
-        }
+        function playerConfirm() { if(currentGateID) socket.emit('playerConfirm', { gateID: currentGateID }); }
+        function leaveWaitingRoom() { socket.emit('quitGame'); showScreen('screen-lobby'); socket.emit('requestGateList'); }
+        function startAI(diff) { resetGameUI(); socket.emit('startSoloAI', { user: myHunter.username, diff }); }
 
         function resetGameUI() {
             document.getElementById('announcement-board').innerHTML = "";
@@ -464,60 +458,39 @@
             const vsData = document.getElementById('vs-data');
             const vsFill = document.getElementById('vs-fill');
             const skillArea = document.getElementById('skill-area');
-
             vsPanel.style.display = 'flex';
             vsFill.style.transition = 'none';
             vsFill.style.width = '0%';
             void vsFill.offsetWidth; 
             vsFill.style.transition = '5s linear';
             vsFill.style.width = '100%';
-
             const attackerColor = data.hunterColor || '#fff';
             const defenderColor = data.targetColor || '#fff';
-
-            vsData.innerHTML = `
-                <div style="font-weight:900; color:white;">
-                    <span style="color:${attackerColor}">${data.hunter}</span> 
-                    <span style="color:var(--sys-red)">VS</span> 
-                    <span style="color:${defenderColor}">${data.target}</span>
-                </div>
-                <div style="font-size:12px; color:var(--sys-blue); margin-top:5px;">${data.targetRank}</div>
-            `;
-
+            vsData.innerHTML = `<div style="font-weight:900; color:white;"><span style="color:${attackerColor}">${data.hunter}</span> <span style="color:var(--sys-red)">VS</span> <span style="color:${defenderColor}">${data.target}</span></div><div style="font-size:12px; color:var(--sys-blue); margin-top:5px;">${data.targetRank}</div>`;
             skillArea.innerHTML = "";
-            
             if (data.hunter === myHunter.username && data.hunterPowerUp) {
                 const btn = document.createElement('button');
                 btn.className = 'skill-activate-btn';
                 btn.innerHTML = `ACTIVATE ${POWER_ICONS[data.hunterPowerUp] || ''} ${data.hunterPowerUp}`;
-                btn.onclick = () => {
-                    socket.emit('activateSkill', { powerUp: data.hunterPowerUp });
-                    btn.disabled = true;
-                    btn.style.opacity = '0.5';
-                    btn.innerText = "SKILL ACTIVE";
-                };
+                btn.onclick = () => { socket.emit('activateSkill', { powerUp: data.hunterPowerUp }); btn.disabled = true; btn.style.opacity = '0.5'; btn.innerText = "SKILL ACTIVE"; };
                 skillArea.appendChild(btn);
             }
         });
 
-        socket.on('battleEnd', () => {
-             document.getElementById('vs-panel').style.display = 'none';
-        });
-
-        socket.on('battleUpdate', (result) => {
-            setTimeout(() => {
-                document.getElementById('vs-panel').style.display = 'none';
-            }, 1000);
-        });
+        socket.on('battleEnd', () => { document.getElementById('vs-panel').style.display = 'none'; });
 
         socket.on('gameStateUpdate', (s) => {
             const board = document.getElementById('game-board');
             board.innerHTML = "";
             const me = s.players.find(p => p.id === socket.id);
-            if(!me) return;
-            const isTurn = s.players[s.turn].id === socket.id;
+            if(!me && !myHunter.isAdmin) return; // Allow admin to see board even if not a player
             
-            const silverGate = Object.values(s.world).find(cell => cell.type === 'Silver');
+            // Fallback for Admin spectating
+            const observer = me || { x: -10, y: -10 }; 
+
+            const isTurn = me ? (s.players[s.turn].id === socket.id) : false;
+            
+            const silverGate = Object.values(s.world).find(cell => cell.rank === 'Silver');
             document.getElementById('tc-silver-container').style.display = silverGate ? 'block' : 'none';
             if(silverGate) document.getElementById('silver-power').innerText = silverGate.mana;
 
@@ -529,15 +502,21 @@
                 let rLabel = p.displayRank || 'Rank E'; 
                 const wRankIdx = currentWorldRankings.findIndex(h => h.username === p.name);
                 const wRankDisplay = wRankIdx !== -1 ? `#${wRankIdx + 1}` : '#??';
-                const mpValue = (p.id === socket.id) ? `MP: ${p.mana}` : rLabel;
+                
+                // FIXED POWERUP ICON LOGIC
+                const pUpIcon = p.powerUp ? ` <span style="color:var(--sys-gold); animation: pulse 0.5s infinite alternate;">${POWER_ICONS[p.powerUp]}</span>` : '';
+                const mpValue = (p.id === socket.id || myHunter.isAdmin) ? `MP: ${p.mana}` : rLabel;
+
+                const adminClass = p.isAdmin ? "class='admin-glow'" : "";
+                const crown = p.isAdmin ? "👑 " : "";
 
                 return `<div class="party-member" style="color:${p.quit ? '#444' : p.color}">
                             <div style="font-size: 10px; color: #888; display:flex; justify-content: space-between;">
                                 <span>WORLD RANK: ${wRankDisplay}</span>
-                                <span>${p.id === socket.id ? rLabel : ''}</span>
+                                <span ${adminClass}>${p.id === socket.id || myHunter.isAdmin ? rLabel : ''}</span>
                             </div>
                             <div style="display:flex; justify-content:space-between;">
-                                <span>${p.name}</span>
+                                <span ${adminClass}>${crown}${p.name}${pUpIcon}</span>
                                 <span style="font-size:12px;">${mpValue} ${status}</span>
                             </div>
                         </div>`;
@@ -549,7 +528,7 @@
                     cell.className = 'cell';
                     if(s.world[`${x}-${y}`]) cell.style.backgroundColor = s.world[`${x}-${y}`].color;
                     
-                    const dist = Math.abs(me.x - x) + Math.abs(me.y - y);
+                    const dist = Math.abs(observer.x - x) + Math.abs(observer.y - y);
                     if(isTurn && dist <= (s.mode === 'Monarch' ? 3 : 2) && dist > 0) {
                         cell.classList.add('valid-move');
                         cell.onclick = () => socket.emit('playerAction', { tx: x, ty: y });
@@ -559,8 +538,12 @@
                         if(p.alive && p.x === x && p.y === y) {
                             const h = document.createElement('div');
                             h.className = 'humanoid';
-                            h.innerHTML = `<div class="name-tag" style="color:${p.color}">
-                                                ${p.name} <span style="font-size:8px; color:#ccc; display:block;">[${p.displayRank || 'E'}]</span>
+                            const adminClass = p.isAdmin ? "admin-glow" : "";
+                            const crown = p.isAdmin ? "👑 " : "";
+                            const pUpIcon = p.powerUp ? ` ${POWER_ICONS[p.powerUp]}` : '';
+                            
+                            h.innerHTML = `<div class="name-tag ${adminClass}" style="color:${p.color}">
+                                                ${crown}${p.name}${pUpIcon} <span style="font-size:8px; color:#ccc; display:block;">[${p.displayRank || 'E'}]</span>
                                            </div>
                                            <div class="h-head" style="background:${p.color}"></div>
                                            <div class="h-body" style="background:${p.color}"></div>`;
