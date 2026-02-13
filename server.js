@@ -22,6 +22,8 @@ const RANK_COLORS = { 'E': '#00ff00', 'D': '#99ff00', 'C': '#ffff00', 'B': '#ff9
 const POWER_UPS = ['DOUBLE DAMAGE', 'GHOST WALK', 'NETHER SWAP'];
 
 // --- RANKING HELPERS ---
+
+// Used for the Profile View (Contains Higher/Lower)
 function getFullRankLabel(mana) {
     if (mana >= 1000) return "Higher S-Rank";
     if (mana >= 901) return "Lower S-Rank";
@@ -35,6 +37,16 @@ function getFullRankLabel(mana) {
     if (mana >= 101) return "Lower D-Rank";
     if (mana >= 51) return "Higher E-Rank";
     return "Lower E-Rank";
+}
+
+// Used for the In-Game Name Board (Removes Higher/Lower)
+function getShortRankLabel(mana) {
+    if (mana >= 901) return "S-Rank";
+    if (mana >= 701) return "A-Rank";
+    if (mana >= 501) return "B-Rank";
+    if (mana >= 301) return "C-Rank";
+    if (mana >= 101) return "D-Rank";
+    return "E-Rank";
 }
 
 function getSimpleRank(mana) {
@@ -76,6 +88,8 @@ io.on('connection', (socket) => {
         if (user) {
             const letter = getSimpleRank(user.manapoints);
             const fullLabel = getFullRankLabel(user.manapoints);
+            
+            // Sending wins/losses here for the profile UI
             socket.emit('authSuccess', { 
                 username: user.username, 
                 mana: user.manapoints, 
@@ -139,7 +153,6 @@ io.on('connection', (socket) => {
     });
 
     socket.on('startSoloAI', (data) => {
-        // Clear any old room user might be stuck in
         Object.keys(rooms).forEach(rid => {
             if (rooms[rid].players.some(p => p.id === socket.id)) delete rooms[rid];
         });
@@ -360,7 +373,6 @@ function triggerRespawn(room, lastPlayerId) {
     room.world = {}; 
     room.globalTurns = 0;
     room.survivorTurns = 0; 
-    // Reset turns to whoever was active to prevent freeze
     const lastPlayerIdx = room.players.findIndex(pl => pl.id === lastPlayerId);
     room.turn = lastPlayerIdx;
 
@@ -388,7 +400,16 @@ function spawnGate(room) {
     room.world[`${x}-${y}`] = { rank, color: RANK_COLORS[rank], mana: Math.floor(Math.random() * (range[1] - range[0] + 1)) + range[0] };
 }
 
-function broadcastGameState(room) { io.to(room.id).emit('gameStateUpdate', room); }
+// Updated to use the Short Rank Label for the In-Game UI
+function broadcastGameState(room) { 
+    const sanitizedPlayers = room.players.map(p => ({
+        ...p,
+        rankLabel: getShortRankLabel(p.mana) // This ensures "Higher/Lower" is hidden in the game board
+    }));
+    
+    const state = { ...room, players: sanitizedPlayers };
+    io.to(room.id).emit('gameStateUpdate', state); 
+}
 
 function advanceTurn(room) {
     if (!rooms[room.id]) return; 
@@ -410,7 +431,6 @@ function advanceTurn(room) {
         attempts++; 
     } while (!room.players[room.turn].alive && attempts < 10);
     
-    // Spawn Silver Gate logic
     if (aliveCount === 1 && !Object.values(room.world).some(g => g.rank === 'Silver')) {
         let sx, sy;
         const survivor = room.players.find(p => p.alive);
@@ -432,7 +452,6 @@ function advanceTurn(room) {
         io.to(room.id).emit('announcement', "SYSTEM: THE SILVER GATE HAS APPEARED NEARBY.");
     }
 
-    // AI Logic
     const nextPlayer = room.players[room.turn];
     if (nextPlayer.isAI && nextPlayer.alive) {
         setTimeout(async () => {
