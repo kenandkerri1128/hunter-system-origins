@@ -74,9 +74,21 @@ function isPathBlocked(room, x1, y1, x2, y2) {
 }
 
 io.on('connection', (socket) => {
-    // --- CHAT SYSTEM (FIXED FOR SCOPED ROOMS) ---
+    // --- CHAT SYSTEM (UPDATED: Room Isolation & Auto-Clear) ---
+    socket.on('joinChatRoom', (roomId) => {
+        // Clear previous rooms to ensure isolation
+        const currentRooms = Array.from(socket.rooms);
+        currentRooms.forEach(r => { if(r !== socket.id) socket.leave(r); });
+        
+        if (roomId) {
+            socket.join(roomId);
+        }
+        // Frontend should listen for this to clear chat UI
+        socket.emit('clearChat');
+    });
+
     socket.on('sendMessage', async (data) => {
-        const { roomId, message, senderName, location } = data;
+        const { roomId, message, senderName } = data;
         const { data: user } = await supabase.from('Hunters').select('manapoints').eq('username', senderName).maybeSingle();
         
         const rank = user ? getPlainRankLabel(user.manapoints) : "Rank E";
@@ -84,18 +96,14 @@ io.on('connection', (socket) => {
             sender: senderName, 
             text: message, 
             rank: rank, 
-            timestamp: new Date().toLocaleTimeString(),
-            location: location // Profile, Multiplayer, Waiting, Ingame
+            timestamp: new Date().toLocaleTimeString() 
         };
 
-        if (location === 'Profile') {
-            // Global chat for everyone on Profile Page
+        if (!roomId) {
+            // General Profile/Lobby chat
             io.emit('receiveMessage', chatData); 
-        } else if (location === 'Multiplayer') {
-            // Only people browsing the multiplayer list
-            io.emit('receiveMessage', chatData); 
-        } else if (roomId) {
-            // Specific for Waiting Room or In-Game
+        } else {
+            // Room specific chat (Multiplayer/Waiting/Ingame)
             io.to(roomId).emit('receiveMessage', chatData); 
         }
     });
@@ -121,7 +129,6 @@ io.on('connection', (socket) => {
             });
             syncAllGates();
             
-            // Push rankings with correct gold/red/white logic handled by frontend after receiving this
             const { data: rankingData } = await supabase.from('Hunters').select('username, manapoints, wins, losses').order('manapoints', { ascending: false }).limit(100);
             socket.emit('updateWorldRankings', rankingData);
         } else {
@@ -159,7 +166,6 @@ io.on('connection', (socket) => {
             world: {}
         };
         socket.join(id);
-        socket.emit('clearChat'); // Reset chat on room entry
         io.to(id).emit('waitingRoomUpdate', rooms[id]);
         socket.emit('playMusic', 'waiting.mp3');
         syncAllGates();
@@ -184,7 +190,6 @@ io.on('connection', (socket) => {
                 powerUp: null 
             });
             socket.join(data.gateID);
-            socket.emit('clearChat'); // Reset chat on room entry
             io.to(data.gateID).emit('waitingRoomUpdate', room);
             socket.emit('playMusic', 'waiting.mp3');
             syncAllGates();
@@ -200,7 +205,6 @@ io.on('connection', (socket) => {
                 room.active = true;
                 for(let i=0; i<5; i++) spawnGate(room);
                 io.to(room.id).emit('gameStart');
-                io.to(room.id).emit('clearChat'); // Reset chat for in-game
                 io.to(room.id).emit('playMusic', 'gameplay.mp3');
                 broadcastGameState(room);
                 syncAllGates();
@@ -224,7 +228,6 @@ io.on('connection', (socket) => {
         for(let i=0; i<5; i++) spawnGate(rooms[id]);
         socket.join(id);
         socket.emit('gameStart');
-        socket.emit('clearChat'); // Reset chat for in-game
         socket.emit('playMusic', 'gameplay.mp3');
         broadcastGameState(rooms[id]);
     });
@@ -241,10 +244,7 @@ io.on('connection', (socket) => {
     });
 
     socket.on('disconnect', async () => { handleExit(socket); });
-    socket.on('quitGame', async () => { 
-        socket.emit('clearChat'); // Reset chat when returning to profile
-        handleExit(socket); 
-    });
+    socket.on('quitGame', async () => { handleExit(socket); });
 
     async function handleExit(s) {
         const room = Object.values(rooms).find(r => r.players.some(p => p.id === s.id));
@@ -263,6 +263,7 @@ io.on('connection', (socket) => {
             const activeHuman = room.players.filter(pl => !pl.quit && !pl.isAI);
             if (activeHuman.length === 1 && room.active && room.isOnline) {
                 const winner = activeHuman[0];
+                const winValue = parseInt(winner.mana.toString()[0]);
                 const { data: u } = await supabase.from('Hunters').select('manapoints, wins').eq('username', winner.name).maybeSingle();
                 if (u) await supabase.from('Hunters').update({ 
                     manapoints: u.manapoints + 20,
@@ -316,13 +317,14 @@ async function resolveConflict(room, p) {
     const aliveCount = room.players.filter(pl => pl.alive).length;
     
     if (opponent) {
-        // VS SCREEN TRIGGER
-        io.to(room.id).emit('battleStart', { 
-            hunter: p.name, 
-            target: opponent.name, 
-            hunterMana: p.mana,
-            targetMana: opponent.mana,
-            isPlayerVsPlayer: true
+        room.players.forEach(pl => {
+            io.to(pl.id).emit('battleStart', { 
+                hunter: p.name, 
+                target: opponent.name, 
+                targetId: opponent.id, 
+                targetMana: opponent.mana, 
+                powerUp: (pl.id === opponent.id || pl.id === p.id) ? pl.powerUp : null
+            });
         });
         await new Promise(r => setTimeout(r, 6000));
         
@@ -364,12 +366,12 @@ async function resolveConflict(room, p) {
             if (pCalcMana >= oCalcMana) { 
                 p.mana += opponent.mana; 
                 opponent.alive = false; 
-                if (!opponent.isAI && room.isOnline) recordLoss(opponent.name);
+                if (!opponent.isAI && room.isOnline) recordLoss(opponent.name, p.mana);
             }
             else { 
                 opponent.mana += p.mana; 
                 p.alive = false; 
-                if (!p.isAI && room.isOnline) recordLoss(p.name);
+                if (!p.isAI && room.isOnline) recordLoss(p.name, opponent.mana);
             }
         }
         return;
@@ -377,14 +379,7 @@ async function resolveConflict(room, p) {
 
     if (room.world[coord]) {
         const gate = room.world[coord];
-        // VS SCREEN TRIGGER FOR GATE
-        io.to(room.id).emit('battleStart', { 
-            hunter: p.name, 
-            target: `RANK ${gate.rank} GATE`, 
-            hunterMana: p.mana,
-            targetMana: gate.mana,
-            isPlayerVsPlayer: false
-        });
+        io.to(room.id).emit('battleStart', { hunter: p.name, target: `RANK ${gate.rank}`, targetMana: gate.mana });
         await new Promise(r => setTimeout(r, 5000));
         
         if (p.mana >= gate.mana) {
@@ -419,17 +414,19 @@ async function resolveConflict(room, p) {
                 triggerRespawn(room, p.id); 
             } else {
                 p.alive = false;
-                if (!p.isAI && room.isOnline) recordLoss(p.name);
+                if (!p.isAI && room.isOnline) recordLoss(p.name, gate.mana);
             }
         }
     }
 }
 
-async function recordLoss(username) {
+async function recordLoss(username, winnerMana) {
     const { data: u } = await supabase.from('Hunters').select('manapoints, losses').eq('username', username).maybeSingle();
     if (u) {
+        // Logic: First digit of winner's mana is the MP loss (e.g. 10500 -> 1 MP)
+        const lossAmount = parseInt(winnerMana.toString()[0]) || 1;
         await supabase.from('Hunters').update({ 
-            manapoints: Math.max(0, u.manapoints - 5), 
+            manapoints: Math.max(0, u.manapoints - lossAmount), 
             losses: (u.losses || 0) + 1 
         }).eq('username', username);
     }
