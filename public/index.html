@@ -58,6 +58,7 @@
         <div style="position:absolute; right:40px; top:20px; text-align:right;">
             <h1 id="st-name" style="font-size: 2.8rem; margin:0;">---</h1>
             <div id="st-world-rank" style="font-size: 1.2rem; font-weight: 900; margin: 5px 0;">WORLD RANK: ---</div>
+            <div id="st-stats" style="font-size: 1rem; color: #aaa; margin-bottom: 5px;">WINS: 0 | LOSSES: 0</div>
             <div id="st-rank" style="font-size: 1.8rem; font-weight: 900; margin:0;">---</div>
             <div id="st-mp" style="font-size: 1.5rem; margin:0; color:white;">MP: ---</div>
         </div>
@@ -188,6 +189,15 @@
             return "LOWER E";
         }
 
+        function getShortRankLabel(m) {
+            if(m >= 901) return "S-RANK";
+            if(m >= 701) return "A-RANK";
+            if(m >= 501) return "B-RANK";
+            if(m >= 301) return "C-RANK";
+            if(m >= 101) return "D-RANK";
+            return "E-RANK";
+        }
+
         function isPathBlockedClient(room, x1, y1, x2, y2) {
             let dx = x2 - x1;
             let dy = y2 - y1;
@@ -228,6 +238,7 @@
             document.getElementById('st-rank').innerText = d.rank; 
             document.getElementById('st-rank').style.color = d.color;
             document.getElementById('st-mp').innerText = `MP: ${d.mana}`;
+            document.getElementById('st-stats').innerText = `WINS: ${d.wins || 0} | LOSSES: ${d.losses || 0}`;
             
             const rankData = getHunterWorldRankData(d.username);
             document.getElementById('st-world-rank').innerText = rankData.rankText;
@@ -340,9 +351,7 @@
             const me = s.players.find(p => p.id === socket.id);
             if(!me) return;
             const isTurn = s.players[s.turn].id === socket.id;
-            const alivePlayers = s.players.filter(p => p.alive);
             
-            // Handle Silver Gate UI
             const silverGate = Object.values(s.world).find(cell => cell.type === 'Silver');
             if (silverGate) {
                 document.getElementById('tc-silver-container').style.display = 'block';
@@ -383,7 +392,8 @@
                             const h = document.createElement('div');
                             h.className = 'humanoid';
                             let pwrTag = (p.id === socket.id && p.powerUp) ? `<span class="power-icon">${POWER_ICONS[p.powerUp]}</span>` : "";
-                            h.innerHTML = `<div class="name-tag" style="color:${p.color}">${p.name}${pwrTag}</div>
+                            let shortRank = getShortRankLabel(p.mana);
+                            h.innerHTML = `<div class="name-tag" style="color:${p.color}">${p.name} (${shortRank})${pwrTag}</div>
                                            <div class="h-head" style="background:${p.color}"></div>
                                            <div class="h-body" style="background:${p.color}"></div>`;
                             cell.appendChild(h);
