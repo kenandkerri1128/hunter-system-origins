@@ -20,12 +20,6 @@
         .cell { width: 42px; height: 42px; background: #000; position: relative; border: 0.5px solid #1a1a1a; transition: 0.3s; }
         .valid-move { box-shadow: inset 0 0 0 3px var(--sys-blue); cursor: pointer; z-index: 5; }
         
-        /* Humanoid Render */
-        .humanoid { position: absolute; bottom: 5px; left: 50%; transform: translateX(-50%); width: 24px; height: 30px; z-index: 10; pointer-events: none; }
-        .h-head { width: 10px; height: 10px; border-radius: 50%; border: 1px solid white; margin: 0 auto; }
-        .h-body { width: 20px; height: 15px; border: 1px solid white; border-radius: 4px 4px 0 0; }
-        .name-tag { position: absolute; top: -22px; left: 50%; transform: translateX(-50%); font-size: 10px; white-space: nowrap; font-weight: 900; background: #000; border: 1px solid #444; padding: 1px 4px; display: flex; flex-direction: column; align-items: center; }
-        
         /* UI Panels */
         .hud-left { width: 280px; background: rgba(0,0,0,0.9); border-right: 2px solid var(--sys-blue); padding: 15px; display: flex; flex-direction: column; height: 650px; overflow-y: auto; }
         .sidebar { width: 350px; border: 2px solid var(--sys-blue); background: #000; padding: 15px; height: 650px; display: flex; flex-direction: column; }
@@ -37,13 +31,10 @@
         .chat-msg { margin-bottom: 4px; border-bottom: 1px solid #111; padding-bottom: 2px; }
         .chat-rank { color: var(--sys-blue); font-size: 10px; margin-right: 5px; }
         
-        #vs-panel { display: none; background: rgba(20,0,0,0.95); border: 2px solid var(--sys-red); padding: 15px; margin-top: 10px; flex-direction: column; align-items: center; box-shadow: 0 0 20px var(--sys-red); z-index: 1000; }
-        .v-fill { height: 6px; background: var(--sys-red); width: 0%; transition: 5s linear; margin-top: 10px; }
-        #victory-screen { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.95); z-index: 10000; flex-direction: column; align-items: center; justify-content: center; }
-        
         /* Gate Styles */
         .gate-mana { box-shadow: inset 0 0 10px #00ff00; background: rgba(0, 255, 0, 0.2); }
-        .gate-silver { box-shadow: 0 0 15px var(--sys-silver); background: radial-gradient(circle, #fff, var(--sys-silver)); border: 2px solid #fff; }
+        .gate-silver { box-shadow: 0 0 15px var(--sys-silver); background: radial-gradient(circle, #fff, var(--sys-silver)); border: 2px solid #fff; animation: silver-pulse 2s infinite; }
+        @keyframes silver-pulse { 0% { opacity: 0.8; } 50% { opacity: 1; transform: scale(1.05); } 100% { opacity: 0.8; } }
     </style>
 </head>
 <body>
@@ -51,13 +42,6 @@
     <audio id="sys-bgm" loop>
         <source id="bgm-source" src="/music/menu.mp3" type="audio/mpeg">
     </audio>
-
-    <div id="victory-screen">
-        <h1 style="font-size: 5rem; color: var(--sys-gold);">QUEST COMPLETE</h1>
-        <h2 id="winner-name" style="font-size: 3rem; color: #fff;">---</h2>
-        <p>RECALCULATING WORLD RANKINGS...</p>
-        <button class="sys-btn" onclick="location.reload()">RETURN TO SYSTEM</button>
-    </div>
 
     <div id="screen-auth" class="screen active">
         <h1 style="font-size: 4rem; letter-spacing: 15px;">SYSTEM</h1>
@@ -101,16 +85,13 @@
 
     <div id="screen-game" class="screen" style="flex-direction: row; justify-content: center; align-items: center;">
         <div class="hud-left">
-            <h3>HOW TO PLAY</h3>
-            <div class="guide-box">
-                <p style="color:var(--sys-gold); font-weight:900; margin:0 0 5px 0;">SYSTEM RULES:</p>
-                <p style="margin:0; font-size:11px; line-height:1.4;">
-                    1. Absorb <b style="color:#00ff00;">Mana Gates</b> to grow stronger.<br>
-                    2. If last player, a <b style="color:var(--sys-silver);">SILVER GATE</b> spawns (500+ MP).<br>
-                    3. If survivor loses to Silver Gate, <b style="color:cyan;">ALL HUNTERS REAWAKEN</b>.
-                </p>
+            <h3>SYSTEM RULES</h3>
+            <div style="font-size: 11px; line-height: 1.6;">
+                * Defeat Gates to gain MP.<br>
+                * <span style="color:var(--sys-silver)">SILVER GATE</span> spawns when alone.<br>
+                * Silver Gate Power: 500 - ∞.<br>
+                * Losing resets all hunters.
             </div>
-
             <h3>PARTY CHAT</h3>
             <div class="chat-container">
                 <div id="game-chat-msgs" class="chat-msgs"></div>
@@ -120,24 +101,12 @@
                 </div>
             </div>
         </div>
-
         <div style="display:flex; gap:20px;">
             <div id="game-board"></div>
             <div class="sidebar">
-                <h3 id="turn-txt" style="color:var(--sys-gold); font-size: 14px;">>> SYSTEM TURN</h3>
-                <div id="party-list"></div>
-                
-                <div id="vs-panel">
-                    <span id="vs-title" style="color:var(--sys-red); font-weight:900;">COMBAT INITIATED</span>
-                    <div id="vs-data" style="font-size: 18px; text-align: center; margin: 10px 0;"></div>
-                    <div style="width:100%; height:4px; background:#111;"><div class="v-fill" id="vs-fill"></div></div>
-                </div>
-
-                <div id="turn-counter">
-                    <div id="tc-spawn-text">RANDOM GATE: ACTIVE</div>
-                    <div id="tc-silver-container" style="display:none; color:var(--sys-silver); border: 2px solid var(--sys-silver); padding: 5px; margin-top: 5px; background: rgba(192,192,192,0.1);">
-                        SILVER GATE DETECTED | POWER: <span id="silver-power">???</span>
-                    </div>
+                <h3 id="turn-txt" style="color:var(--sys-gold); font-size: 14px;">>> SYSTEM ONLINE</h3>
+                <div id="tc-silver-container" style="display:none; color:var(--sys-silver); border: 2px solid var(--sys-silver); padding: 5px; margin-top: 5px; background: rgba(192,192,192,0.1);">
+                    SILVER GATE DETECTED | POWER: <span id="silver-power">???</span>
                 </div>
                 <div id="announcement-board" style="flex-grow:1; background:#050505; font-size:11px; margin-top:10px; overflow-y:auto; padding:10px; border:1px solid #222;"></div>
                 <button class="sys-btn" style="width:100%; height:45px; font-size:12px; margin-top:10px;" onclick="quitAction()">QUIT QUEST</button>
@@ -149,7 +118,6 @@
         const socket = io();
         let myHunter = null, myRoomID = "GLOBAL_LOBBY";
 
-        // --- AUDIO SYSTEM ---
         const bgm = document.getElementById('sys-bgm');
         const bgmSource = document.getElementById('bgm-source');
 
@@ -163,7 +131,6 @@
             }
         }
 
-        // --- AUTH & NAVIGATION ---
         function showScreen(id) { 
             document.querySelectorAll('.screen').forEach(s => s.classList.remove('active')); 
             const target = document.getElementById(id);
@@ -193,13 +160,12 @@
             const list = document.getElementById('world-rank-list');
             list.innerHTML = l.map((h, i) => `
                 <div style="display:flex; justify-content:space-between; padding:5px; border-bottom:1px solid #222; font-weight:900;">
-                    <span>#${i+1} ${h.username}</span> <span>${h.manapoints} MP</span>
+                    <span>#${i+1} ${h.username}</span> <span style="color:var(--sys-blue);">${h.mana || h.manapoints} MP</span>
                 </div>`).join('');
             const myPos = l.findIndex(h => h.username === myHunter.username);
             if(myPos !== -1) document.getElementById('st-world-rank').innerText = `WORLD RANK: #${myPos + 1}`;
         });
 
-        // --- CHAT LOGIC ---
         function sendChat(type) {
             const input = document.getElementById(`${type}-chat-input`);
             if(!input || !input.value.trim() || !myHunter) return;
@@ -227,12 +193,10 @@
             }
         });
 
-        // --- GAMEPLAY RENDER ---
         socket.on('gameStateUpdate', (room) => {
             const board = document.getElementById('game-board');
             board.innerHTML = '';
             
-            // Show Silver Gate UI if it exists
             const silverGate = Object.values(room.world).find(g => g.type === 'silver');
             const silverUI = document.getElementById('tc-silver-container');
             if(silverGate) {
@@ -247,10 +211,7 @@
                     const cell = document.createElement('div');
                     cell.className = 'cell';
                     const gate = room.world[`${x}-${y}`];
-                    
-                    if (gate) {
-                        cell.classList.add(gate.type === 'silver' ? 'gate-silver' : 'gate-mana');
-                    }
+                    if (gate) cell.classList.add(gate.type === 'silver' ? 'gate-silver' : 'gate-mana');
                     board.appendChild(cell);
                 }
             }
