@@ -140,7 +140,7 @@ io.on('connection', (socket) => {
             players: [
                 { id: socket.id, name: data.user, ...corners[0], mana: Math.floor(Math.random()*201)+100, alive: true, isAI: false, color: PLAYER_COLORS[0], quit: false, powerUp: null },
                 { id: 'ai1', name: AI_NAMES[1], ...corners[1], mana: Math.floor(Math.random()*201)+100, alive: true, isAI: true, color: PLAYER_COLORS[1], quit: false, powerUp: null },
-                { id: 'ai2', name: AI_NAMES[2], ...corners[2], mana: Math.floor(Math.random()*201)+100, alive: true, isAI: true, color: PLAYER_COLORS[3], quit: false, powerUp: null },
+                { id: 'ai2', name: AI_NAMES[2], ...corners[2], mana: Math.floor(Math.random()*201)+100, alive: true, isAI: true, color: PLAYER_COLORS[2], quit: false, powerUp: null },
                 { id: 'ai3', name: AI_NAMES[3], ...corners[3], mana: Math.floor(Math.random()*201)+100, alive: true, isAI: true, color: PLAYER_COLORS[3], quit: false, powerUp: null }
             ],
             world: {}
@@ -168,7 +168,9 @@ io.on('connection', (socket) => {
     async function handleExit(s) {
         const room = Object.values(rooms).find(r => r.players.some(p => p.id === s.id));
         if (room) {
-            const p = room.players.find(pl => pl.id === s.id);
+            const pIndex = room.players.findIndex(pl => pl.id === s.id);
+            const p = room.players[pIndex];
+            
             if (p && room.isOnline && !p.quit && room.active) {
                 p.quit = true; p.alive = false; 
                 const { data: u } = await supabase.from('Hunters').select('manapoints').eq('username', p.name).maybeSingle();
@@ -187,8 +189,12 @@ io.on('connection', (socket) => {
             }
 
             if (!room.active) room.players = room.players.filter(pl => pl.id !== s.id);
-            if (room.players.length === 0 || room.players.every(pl => pl.isAI && !room.active)) delete rooms[room.id];
-            else broadcastGameState(room);
+            
+            if (room.players.length === 0 || room.players.every(pl => pl.isAI && !room.active)) {
+                delete rooms[room.id];
+            } else {
+                broadcastGameState(room);
+            }
             syncAllGates();
             s.emit('returnToProfile');
         }
@@ -198,18 +204,18 @@ io.on('connection', (socket) => {
         const room = Object.values(rooms).find(r => r.players.some(p => p.id === socket.id));
         if (!room || !room.active) return;
         const p = room.players[room.turn];
-        if (p.id !== socket.id) return;
+        if (!p || p.id !== socket.id) return;
 
         if (isPathBlocked(room, p.x, p.y, data.tx, data.ty)) {
             socket.emit('announcement', "SYSTEM: MOVEMENT BLOCKED BY A GATE.");
             return;
         }
 
+        p.x = data.tx; p.y = data.ty;
+        
         const alivePlayers = room.players.filter(pl => pl.alive);
         if (alivePlayers.length === 1) room.survivorTurns++;
 
-        p.x = data.tx; p.y = data.ty;
-        
         await resolveConflict(room, p);
         if (rooms[room.id]) advanceTurn(room);
     });
@@ -299,7 +305,7 @@ async function resolveConflict(room, p) {
                 }, 5100); 
             } else {
                 const aliveSorted = [...room.players].filter(pl => pl.alive).sort((a,b) => a.mana - b.mana);
-                if (Math.random() < (aliveSorted[0].id === p.id ? 0.6 : 0.15) && !p.powerUp) {
+                if (aliveSorted.length > 0 && Math.random() < (aliveSorted[0].id === p.id ? 0.6 : 0.15) && !p.powerUp) {
                     p.powerUp = POWER_UPS[Math.floor(Math.random() * POWER_UPS.length)];
                     io.to(p.id).emit('announcement', `SYSTEM: POWER-UP OBTAINED: ${p.powerUp}`);
                 }
@@ -334,18 +340,24 @@ function triggerRespawn(room, lastPlayerId) {
     
     room.world = {}; 
     room.globalTurns = 0;
-    room.survivorTurns = 0; 
+    room.survivorTurns = 0;
+    room.turn = 0; // Reset turn to index 0 to avoid crash
     for(let i=0; i<5; i++) spawnGate(room);
-    io.to(room.id).emit('announcement', `SYSTEM: QUEST FAILED. ALL HUNTERS REAWAKENED. (SURVIVOR KEPT MP, OTHERS GAINED BONUSES)`);
+    
+    io.to(room.id).emit('announcement', `SYSTEM: QUEST FAILED. ALL HUNTERS REAWAKENED.`);
     broadcastGameState(room);
 }
 
 function spawnGate(room) {
     let x, y;
-    do { x = Math.floor(Math.random() * 15); y = Math.floor(Math.random() * 15); } 
-    while (room.players.some(p => p.alive && p.x === x && p.y === y) || room.world[`${x}-${y}`]);
+    let attempts = 0;
+    do { 
+        x = Math.floor(Math.random() * 15); 
+        y = Math.floor(Math.random() * 15); 
+        attempts++;
+    } while ((room.players.some(p => p.alive && p.x === x && p.y === y) || room.world[`${x}-${y}`]) && attempts < 100);
     
-    const cycle = Math.floor(room.globalTurns / room.players.length);
+    const cycle = Math.floor(room.globalTurns / (room.players.length || 1));
     
     let pool;
     if (room.respawnHappened) {
@@ -377,7 +389,11 @@ function advanceTurn(room) {
     if (room.globalTurns % (room.players.length * 3) === 0) for(let i=0; i<5; i++) spawnGate(room);
     
     let attempts = 0;
-    do { room.turn = (room.turn + 1) % room.players.length; attempts++; } while (!room.players[room.turn].alive && attempts < 5);
+    const totalPlayers = room.players.length;
+    do { 
+        room.turn = (room.turn + 1) % totalPlayers; 
+        attempts++; 
+    } while (!room.players[room.turn].alive && attempts < totalPlayers);
     
     if (aliveCount === 1 && !Object.values(room.world).some(g => g.rank === 'Silver')) {
         let sx, sy;
@@ -405,10 +421,12 @@ function advanceTurn(room) {
         io.to(room.id).emit('announcement', "SYSTEM: THE SILVER GATE HAS APPEARED NEARBY.");
     }
 
-    if (room.players[room.turn].isAI && room.players[room.turn].alive) {
+    const nextP = room.players[room.turn];
+    if (nextP.isAI && nextP.alive) {
         setTimeout(async () => {
-            if (!rooms[room.id]) return;
+            if (!rooms[room.id] || room.turn >= room.players.length) return;
             const ai = room.players[room.turn];
+            if (!ai || !ai.isAI || !ai.alive) return;
             
             let tx = ai.x, ty = ai.y;
 
@@ -447,7 +465,7 @@ function advanceTurn(room) {
             }
             
             if (rooms[room.id]) advanceTurn(room);
-        }, 800);
+        }, 1000);
     }
     if (rooms[room.id]) broadcastGameState(room);
 }
