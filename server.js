@@ -3,7 +3,8 @@ const app = express();
 const http = require('http').createServer(app);
 const io = require('socket.io')(http);
 const path = require('path');
-const { createClient } = require('@supabase/supabase-base-js'); // Ensure this is installed!
+// FIXED: Removed '-base-' from the name to match the official package
+const { createClient } = require('@supabase/supabase-js'); 
 
 // --- DATABASE CONNECTION ---
 // Replace these with your actual Supabase credentials!
@@ -87,54 +88,69 @@ io.on('connection', (socket) => {
     socket.on('authRequest', async (data) => {
         const { type, u, p } = data;
         
-        if (type === 'signup') {
-            const { data: existing } = await supabase.from('hunters').select('*').eq('username', u).single();
-            if (existing) return socket.emit('authError', "HUNTER ID ALREADY EXISTS");
+        try {
+            if (type === 'signup') {
+                const { data: existing } = await supabase.from('hunters').select('*').eq('username', u).single();
+                if (existing) return socket.emit('authError', "HUNTER ID ALREADY EXISTS");
 
-            await supabase.from('hunters').insert([
-                { username: u, password: p, mana: 20, wins: 0, losses: 0 }
-            ]);
-        }
-        
-        // Fetch User from Supabase
-        const { data: user, error } = await supabase.from('hunters').select('*').eq('username', u).eq('password', p).single();
+                await supabase.from('hunters').insert([
+                    { username: u, password: p, mana: 20, wins: 0, losses: 0 }
+                ]);
+            }
+            
+            // Fetch User from Supabase
+            const { data: user, error } = await supabase.from('hunters').select('*').eq('username', u).eq('password', p).single();
 
-        if (user) {
-            socket.emit('authSuccess', {
-                username: user.username,
-                mana: user.mana,
-                rank: getDetailedRank(user.mana),
-                color: '#00d2ff',
-                wins: user.wins,
-                losses: user.losses
-            });
-        } else {
-            socket.emit('authError', "INVALID ACCESS CODE");
+            if (user) {
+                socket.emit('authSuccess', {
+                    username: user.username,
+                    mana: user.mana,
+                    rank: getDetailedRank(user.mana),
+                    color: '#00d2ff',
+                    wins: user.wins,
+                    losses: user.losses
+                });
+            } else {
+                socket.emit('authError', "INVALID ACCESS CODE");
+            }
+        } catch (err) {
+            console.error("Auth System Error:", err);
+            socket.emit('authError', "SYSTEM OFFLINE: CHECK DATABASE CONNECTION");
         }
     });
 
     // 2. WORLD RANKINGS FROM SUPABASE
     socket.on('requestWorldRankings', async () => {
-        const { data: rankings } = await supabase
-            .from('hunters')
-            .select('username, mana')
-            .order('mana', { ascending: false })
-            .limit(10);
-            
-        socket.emit('updateWorldRankings', rankings.map(u => ({ username: u.username, manapoints: u.mana })));
+        try {
+            const { data: rankings } = await supabase
+                .from('hunters')
+                .select('username, mana')
+                .order('mana', { ascending: false })
+                .limit(10);
+                
+            if (rankings) {
+                socket.emit('updateWorldRankings', rankings.map(u => ({ username: u.username, manapoints: u.mana })));
+            }
+        } catch (err) {
+            console.error("Ranking Error:", err);
+        }
     });
 
     socket.on('sendMessage', async (data) => {
         const { roomId, message, senderName } = data;
         
-        // Fetch rank dynamically for chat
-        const { data: user } = await supabase.from('hunters').select('mana').eq('username', senderName).single();
-        const rank = getDetailedRank(user?.mana || 0);
+        try {
+            // Fetch rank dynamically for chat
+            const { data: user } = await supabase.from('hunters').select('mana').eq('username', senderName).single();
+            const rank = getDetailedRank(user?.mana || 0);
 
-        if (!roomId) {
-            io.emit('receiveGlobalMessage', { sender: senderName, text: message });
-        } else {
-            io.to(roomId).emit('receiveMessage', { sender: senderName, text: message, rank: rank });
+            if (!roomId) {
+                io.emit('receiveGlobalMessage', { sender: senderName, text: message });
+            } else {
+                io.to(roomId).emit('receiveMessage', { sender: senderName, text: message, rank: rank });
+            }
+        } catch (err) {
+            console.error("Chat Error:", err);
         }
     });
 
