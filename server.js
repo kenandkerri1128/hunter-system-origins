@@ -70,13 +70,20 @@ io.on('connection', (socket) => {
         if (data.type === 'signup') {
             const { data: existing } = await supabase.from('Hunters').select('username').eq('username', data.u).maybeSingle();
             if (existing) return socket.emit('authError', "HUNTER ID ALREADY EXISTS");
-            await supabase.from('Hunters').insert([{ username: data.u, password: data.p, manapoints: 0 }]);
+            await supabase.from('Hunters').insert([{ username: data.u, password: data.p, manapoints: 0, wins: 0, losses: 0 }]);
         }
         const { data: user } = await supabase.from('Hunters').select('*').eq('username', data.u).eq('password', data.p).maybeSingle();
         if (user) {
             const letter = getSimpleRank(user.manapoints);
             const fullLabel = getFullRankLabel(user.manapoints);
-            socket.emit('authSuccess', { username: user.username, mana: user.manapoints, rank: fullLabel, color: RANK_COLORS[letter] });
+            socket.emit('authSuccess', { 
+                username: user.username, 
+                mana: user.manapoints, 
+                rank: fullLabel, 
+                color: RANK_COLORS[letter],
+                wins: user.wins || 0,
+                losses: user.losses || 0
+            });
             syncAllGates();
         } else {
             socket.emit('authError', "INVALID ACCESS CODE OR ID");
@@ -84,7 +91,7 @@ io.on('connection', (socket) => {
     });
 
     socket.on('requestWorldRankings', async () => {
-        const { data } = await supabase.from('Hunters').select('username, manapoints').order('manapoints', { ascending: false }).limit(10);
+        const { data } = await supabase.from('Hunters').select('username, manapoints, wins, losses').order('manapoints', { ascending: false }).limit(10);
         socket.emit('updateWorldRankings', data);
     });
 
@@ -132,6 +139,11 @@ io.on('connection', (socket) => {
     });
 
     socket.on('startSoloAI', (data) => {
+        // Clear any old room user might be stuck in
+        Object.keys(rooms).forEach(rid => {
+            if (rooms[rid].players.some(p => p.id === socket.id)) delete rooms[rid];
+        });
+
         const id = `solo_${socket.id}_${Date.now()}`;
         const corners = [{x:0,y:0}, {x:14,y:0}, {x:0,y:14}, {x:14,y:14}];
         rooms[id] = {
@@ -168,33 +180,33 @@ io.on('connection', (socket) => {
     async function handleExit(s) {
         const room = Object.values(rooms).find(r => r.players.some(p => p.id === s.id));
         if (room) {
-            const pIndex = room.players.findIndex(pl => pl.id === s.id);
-            const p = room.players[pIndex];
-            
+            const p = room.players.find(pl => pl.id === s.id);
             if (p && room.isOnline && !p.quit && room.active) {
                 p.quit = true; p.alive = false; 
-                const { data: u } = await supabase.from('Hunters').select('manapoints').eq('username', p.name).maybeSingle();
-                if (u) await supabase.from('Hunters').update({ manapoints: Math.max(0, u.manapoints - 20) }).eq('username', p.name);
-                io.to(room.id).emit('announcement', `${p.name} ABANDONED THE QUEST. -20 MP.`);
+                const { data: u } = await supabase.from('Hunters').select('manapoints, losses').eq('username', p.name).maybeSingle();
+                if (u) await supabase.from('Hunters').update({ 
+                    manapoints: Math.max(0, u.manapoints - 20),
+                    losses: (u.losses || 0) + 1 
+                }).eq('username', p.name);
+                io.to(room.id).emit('announcement', `${p.name} ABANDONED THE QUEST. -20 MP & LOSS RECORDED.`);
             }
 
             const activeHuman = room.players.filter(pl => !pl.quit && !pl.isAI);
             if (activeHuman.length === 1 && room.active && room.isOnline) {
                 const winner = activeHuman[0];
-                const { data: u } = await supabase.from('Hunters').select('manapoints').eq('username', winner.name).maybeSingle();
-                if (u) await supabase.from('Hunters').update({ manapoints: u.manapoints + 20 }).eq('username', winner.name);
+                const { data: u } = await supabase.from('Hunters').select('manapoints, wins').eq('username', winner.name).maybeSingle();
+                if (u) await supabase.from('Hunters').update({ 
+                    manapoints: u.manapoints + 20,
+                    wins: (u.wins || 0) + 1
+                }).eq('username', winner.name);
                 io.to(room.id).emit('victoryEvent', { winner: winner.name });
-                io.to(room.id).emit('announcement', `ALL OTHER HUNTERS QUIT. ${winner.name} WINS BY DEFAULT. +20 MP.`);
+                io.to(room.id).emit('announcement', `ALL OTHER HUNTERS QUIT. ${winner.name} WINS BY DEFAULT. +20 MP & WIN RECORDED.`);
                 setTimeout(() => { delete rooms[room.id]; syncAllGates(); }, 5000);
             }
 
             if (!room.active) room.players = room.players.filter(pl => pl.id !== s.id);
-            
-            if (room.players.length === 0 || room.players.every(pl => pl.isAI && !room.active)) {
-                delete rooms[room.id];
-            } else {
-                broadcastGameState(room);
-            }
+            if (room.players.length === 0 || room.players.every(pl => pl.isAI && !room.active)) delete rooms[room.id];
+            else broadcastGameState(room);
             syncAllGates();
             s.emit('returnToProfile');
         }
@@ -204,18 +216,18 @@ io.on('connection', (socket) => {
         const room = Object.values(rooms).find(r => r.players.some(p => p.id === socket.id));
         if (!room || !room.active) return;
         const p = room.players[room.turn];
-        if (!p || p.id !== socket.id) return;
+        if (p.id !== socket.id) return;
 
         if (isPathBlocked(room, p.x, p.y, data.tx, data.ty)) {
             socket.emit('announcement', "SYSTEM: MOVEMENT BLOCKED BY A GATE.");
             return;
         }
 
-        p.x = data.tx; p.y = data.ty;
-        
         const alivePlayers = room.players.filter(pl => pl.alive);
         if (alivePlayers.length === 1) room.survivorTurns++;
 
+        p.x = data.tx; p.y = data.ty;
+        
         await resolveConflict(room, p);
         if (rooms[room.id]) advanceTurn(room);
     });
@@ -276,8 +288,12 @@ async function resolveConflict(room, p) {
         });
 
         if (!combatCancelled) {
-            if (pCalcMana >= oCalcMana) { p.mana += opponent.mana; opponent.alive = false; }
-            else { opponent.mana += p.mana; p.alive = false; }
+            if (pCalcMana >= oCalcMana) { 
+                p.mana += opponent.mana; opponent.alive = false; 
+            }
+            else { 
+                opponent.mana += p.mana; p.alive = false; 
+            }
         }
         return;
     }
@@ -293,8 +309,11 @@ async function resolveConflict(room, p) {
             if (gate.rank === 'Silver') {
                 const humanPlayer = room.players.find(pl => !pl.isAI && pl.id === p.id);
                 if (humanPlayer && room.isOnline) {
-                    const { data: u } = await supabase.from('Hunters').select('manapoints').eq('username', humanPlayer.name).maybeSingle();
-                    if (u) await supabase.from('Hunters').update({ manapoints: u.manapoints + 20 }).eq('username', humanPlayer.name);
+                    const { data: u } = await supabase.from('Hunters').select('manapoints, wins').eq('username', humanPlayer.name).maybeSingle();
+                    if (u) await supabase.from('Hunters').update({ 
+                        manapoints: u.manapoints + 20,
+                        wins: (u.wins || 0) + 1 
+                    }).eq('username', humanPlayer.name);
                 }
                 io.to(room.id).emit('victoryEvent', { winner: p.name });
                 room.active = false;
@@ -305,7 +324,7 @@ async function resolveConflict(room, p) {
                 }, 5100); 
             } else {
                 const aliveSorted = [...room.players].filter(pl => pl.alive).sort((a,b) => a.mana - b.mana);
-                if (aliveSorted.length > 0 && Math.random() < (aliveSorted[0].id === p.id ? 0.6 : 0.15) && !p.powerUp) {
+                if (Math.random() < (aliveSorted[0].id === p.id ? 0.6 : 0.15) && !p.powerUp) {
                     p.powerUp = POWER_UPS[Math.floor(Math.random() * POWER_UPS.length)];
                     io.to(p.id).emit('announcement', `SYSTEM: POWER-UP OBTAINED: ${p.powerUp}`);
                 }
@@ -340,31 +359,28 @@ function triggerRespawn(room, lastPlayerId) {
     
     room.world = {}; 
     room.globalTurns = 0;
-    room.survivorTurns = 0;
-    room.turn = 0; // Reset turn to index 0 to avoid crash
+    room.survivorTurns = 0; 
+    // Reset turns to whoever was active to prevent freeze
+    const lastPlayerIdx = room.players.findIndex(pl => pl.id === lastPlayerId);
+    room.turn = lastPlayerIdx;
+
     for(let i=0; i<5; i++) spawnGate(room);
-    
     io.to(room.id).emit('announcement', `SYSTEM: QUEST FAILED. ALL HUNTERS REAWAKENED.`);
     broadcastGameState(room);
 }
 
 function spawnGate(room) {
     let x, y;
-    let attempts = 0;
+    let tries = 0;
     do { 
-        x = Math.floor(Math.random() * 15); 
-        y = Math.floor(Math.random() * 15); 
-        attempts++;
-    } while ((room.players.some(p => p.alive && p.x === x && p.y === y) || room.world[`${x}-${y}`]) && attempts < 100);
+        x = Math.floor(Math.random() * 15); y = Math.floor(Math.random() * 15); 
+        tries++;
+    } while ((room.players.some(p => p.alive && p.x === x && p.y === y) || room.world[`${x}-${y}`]) && tries < 100);
     
-    const cycle = Math.floor(room.globalTurns / (room.players.length || 1));
-    
-    let pool;
-    if (room.respawnHappened) {
-        pool = cycle >= 6 ? ['A', 'S'] : (cycle >= 3 ? ['B', 'A'] : ['C', 'B']);
-    } else {
-        pool = cycle >= 6 ? ['C', 'B'] : (cycle >= 3 ? ['D', 'C'] : ['E', 'D']);
-    }
+    const cycle = Math.floor(room.globalTurns / room.players.length);
+    let pool = room.respawnHappened 
+        ? (cycle >= 6 ? ['A', 'S'] : (cycle >= 3 ? ['B', 'A'] : ['C', 'B']))
+        : (cycle >= 6 ? ['C', 'B'] : (cycle >= 3 ? ['D', 'C'] : ['E', 'D']));
     
     const rank = pool[Math.floor(Math.random() * pool.length)];
     const manaMap = { 'E': [0, 100], 'D': [101, 300], 'C': [301, 500], 'B': [501, 700], 'A': [701, 900], 'S': [901, 1200] };
@@ -389,45 +405,39 @@ function advanceTurn(room) {
     if (room.globalTurns % (room.players.length * 3) === 0) for(let i=0; i<5; i++) spawnGate(room);
     
     let attempts = 0;
-    const totalPlayers = room.players.length;
     do { 
-        room.turn = (room.turn + 1) % totalPlayers; 
+        room.turn = (room.turn + 1) % room.players.length; 
         attempts++; 
-    } while (!room.players[room.turn].alive && attempts < totalPlayers);
+    } while (!room.players[room.turn].alive && attempts < 10);
     
+    // Spawn Silver Gate logic
     if (aliveCount === 1 && !Object.values(room.world).some(g => g.rank === 'Silver')) {
         let sx, sy;
         const survivor = room.players.find(p => p.alive);
         let validPos = false;
-        
         for (let tries = 0; tries < 50; tries++) {
             let offsetX = (Math.random() > 0.5 ? 1 : -1) * (Math.floor(Math.random() * 2) + 3);
             let offsetY = (Math.random() > 0.5 ? 1 : -1) * (Math.floor(Math.random() * 2) + 3);
             sx = Math.max(0, Math.min(14, survivor.x + offsetX));
             sy = Math.max(0, Math.min(14, survivor.y + offsetY));
-            
             if (!room.players.some(p => p.alive && p.x === sx && p.y === sy) && !room.world[`${sx}-${sy}`]) {
-                validPos = true;
-                break;
+                validPos = true; break;
             }
         }
-        
         if (!validPos) {
             do { sx = Math.floor(Math.random()*15); sy = Math.floor(Math.random()*15); } 
             while (room.players.some(p => p.alive && p.x === sx && p.y === sy));
         }
-
         room.world[`${sx}-${sy}`] = { rank: 'Silver', color: '#fff', mana: Math.floor(Math.random()*10000)+500 };
         io.to(room.id).emit('announcement', "SYSTEM: THE SILVER GATE HAS APPEARED NEARBY.");
     }
 
-    const nextP = room.players[room.turn];
-    if (nextP.isAI && nextP.alive) {
+    // AI Logic
+    const nextPlayer = room.players[room.turn];
+    if (nextPlayer.isAI && nextPlayer.alive) {
         setTimeout(async () => {
-            if (!rooms[room.id] || room.turn >= room.players.length) return;
-            const ai = room.players[room.turn];
-            if (!ai || !ai.isAI || !ai.alive) return;
-            
+            if (!rooms[room.id] || room.turn !== room.players.indexOf(nextPlayer)) return;
+            const ai = nextPlayer;
             let tx = ai.x, ty = ai.y;
 
             if (room.mode === 'Monarch') {
@@ -440,32 +450,27 @@ function advanceTurn(room) {
                 room.players.forEach(p => {
                     if (p.alive && p.id !== ai.id && ai.mana > p.mana) targets.push({ x: p.x, y: p.y, mana: p.mana });
                 });
-
                 if (targets.length > 0) {
                     targets.sort((a,b) => (Math.abs(ai.x - a.x) + Math.abs(ai.y - a.y)) - (Math.abs(ai.x - b.x) + Math.abs(ai.y - b.y)));
                     const best = targets[0];
                     if (best.x > ai.x) tx++; else if (best.x < ai.x) tx--;
                     if (best.y > ai.y) ty++; else if (best.y < ai.y) ty--;
                 } else {
-                    tx += (Math.random() > 0.5 ? 1 : -1);
-                    ty += (Math.random() > 0.5 ? 1 : -1);
+                    tx += (Math.random() > 0.5 ? 1 : -1); ty += (Math.random() > 0.5 ? 1 : -1);
                 }
             } else {
                 tx = Math.max(0, Math.min(14, ai.x + (Math.random() > 0.5 ? 1 : -1)));
                 ty = Math.max(0, Math.min(14, ai.y + (Math.random() > 0.5 ? 1 : -1)));
             }
-            
-            tx = Math.max(0, Math.min(14, tx));
-            ty = Math.max(0, Math.min(14, ty));
+            tx = Math.max(0, Math.min(14, tx)); ty = Math.max(0, Math.min(14, ty));
 
             if (!isPathBlocked(room, ai.x, ai.y, tx, ty)) {
                 ai.x = tx; ai.y = ty;
                 if (aliveCount === 1) room.survivorTurns++;
                 await resolveConflict(room, ai);
             }
-            
             if (rooms[room.id]) advanceTurn(room);
-        }, 1000);
+        }, 800);
     }
     if (rooms[room.id]) broadcastGameState(room);
 }
