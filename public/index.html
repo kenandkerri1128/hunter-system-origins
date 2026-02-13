@@ -17,7 +17,7 @@
         
         /* Game Board */
         #game-board { display: grid; grid-template-columns: repeat(15, 42px); gap: 2px; background: #111; border: 4px solid var(--sys-blue); }
-        .cell { width: 42px; height: 42px; background: #000; position: relative; border: 0.5px solid #1a1a1a; }
+        .cell { width: 42px; height: 42px; background: #000; position: relative; border: 0.5px solid #1a1a1a; transition: 0.3s; }
         .valid-move { box-shadow: inset 0 0 0 3px var(--sys-blue); cursor: pointer; z-index: 5; }
         
         /* Humanoid Render */
@@ -40,6 +40,10 @@
         #vs-panel { display: none; background: rgba(20,0,0,0.95); border: 2px solid var(--sys-red); padding: 15px; margin-top: 10px; flex-direction: column; align-items: center; box-shadow: 0 0 20px var(--sys-red); z-index: 1000; }
         .v-fill { height: 6px; background: var(--sys-red); width: 0%; transition: 5s linear; margin-top: 10px; }
         #victory-screen { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.95); z-index: 10000; flex-direction: column; align-items: center; justify-content: center; }
+        
+        /* Gate Styles */
+        .gate-mana { box-shadow: inset 0 0 10px #00ff00; background: rgba(0, 255, 0, 0.2); }
+        .gate-silver { box-shadow: 0 0 15px var(--sys-silver); background: radial-gradient(circle, #fff, var(--sys-silver)); border: 2px solid #fff; }
     </style>
 </head>
 <body>
@@ -52,6 +56,7 @@
         <h1 style="font-size: 5rem; color: var(--sys-gold);">QUEST COMPLETE</h1>
         <h2 id="winner-name" style="font-size: 3rem; color: #fff;">---</h2>
         <p>RECALCULATING WORLD RANKINGS...</p>
+        <button class="sys-btn" onclick="location.reload()">RETURN TO SYSTEM</button>
     </div>
 
     <div id="screen-auth" class="screen active">
@@ -82,15 +87,14 @@
                     <div id="global-chat-msgs" class="chat-msgs"></div>
                     <div class="chat-input-area">
                         <input type="text" id="global-chat-input" class="chat-input" placeholder="Broadcast to all hunters...">
-                        <button onclick="sendChat('global')" style="background:var(--sys-blue); border:none; padding:5px 10px;">SEND</button>
+                        <button onclick="sendChat('global')" style="background:var(--sys-blue); border:none; padding:5px 10px; cursor:pointer;">SEND</button>
                     </div>
                 </div>
             </div>
         </div>
 
         <div style="margin-top: 20px;">
-            <button class="sys-btn" onclick="showScreen('screen-difficulty')">SINGLE PLAYER</button>
-            <button class="sys-btn" onclick="openOnlineLobby()">MULTIPLAYER</button>
+            <button class="sys-btn" onclick="showScreen('screen-game')">START QUEST</button>
             <button class="sys-btn" style="border-color:#555;" onclick="location.reload()">LOGOUT</button>
         </div>
     </div>
@@ -112,7 +116,7 @@
                 <div id="game-chat-msgs" class="chat-msgs"></div>
                 <div class="chat-input-area">
                     <input type="text" id="game-chat-input" class="chat-input" placeholder="Party message...">
-                    <button onclick="sendChat('game')" style="background:var(--sys-blue); border:none;">SEND</button>
+                    <button onclick="sendChat('game')" style="background:var(--sys-blue); border:none; cursor:pointer;">SEND</button>
                 </div>
             </div>
         </div>
@@ -126,13 +130,12 @@
                 <div id="vs-panel">
                     <span id="vs-title" style="color:var(--sys-red); font-weight:900;">COMBAT INITIATED</span>
                     <div id="vs-data" style="font-size: 18px; text-align: center; margin: 10px 0;"></div>
-                    <div id="skill-area"></div>
                     <div style="width:100%; height:4px; background:#111;"><div class="v-fill" id="vs-fill"></div></div>
                 </div>
 
                 <div id="turn-counter">
-                    <div id="tc-spawn-text">RANDOM GATE: <span id="tc-spawn">3</span> ROUNDS</div>
-                    <div id="tc-silver-container" style="display:none; color:var(--sys-silver); border: 2px solid var(--sys-silver); padding: 5px; margin-top: 5px;">
+                    <div id="tc-spawn-text">RANDOM GATE: ACTIVE</div>
+                    <div id="tc-silver-container" style="display:none; color:var(--sys-silver); border: 2px solid var(--sys-silver); padding: 5px; margin-top: 5px; background: rgba(192,192,192,0.1);">
                         SILVER GATE DETECTED | POWER: <span id="silver-power">???</span>
                     </div>
                 </div>
@@ -144,22 +147,15 @@
 
     <script>
         const socket = io();
-        let myHunter = null, myRoomID = null;
+        let myHunter = null, myRoomID = "GLOBAL_LOBBY";
 
         // --- AUDIO SYSTEM ---
         const bgm = document.getElementById('sys-bgm');
         const bgmSource = document.getElementById('bgm-source');
-        const TRACKS = {
-            'screen-auth': '/music/menu.mp3',
-            'screen-menu': '/music/menu.mp3',
-            'screen-online': '/music/menu.mp3',
-            'screen-difficulty': '/music/menu.mp3',
-            'screen-waiting': '/music/waiting.mp3',
-            'screen-game': '/music/gameplay.mp3'
-        };
 
         function playMusicForScreen(screenId) {
-            const trackPath = TRACKS[screenId];
+            const tracks = { 'screen-auth': '/music/menu.mp3', 'screen-menu': '/music/menu.mp3', 'screen-game': '/music/gameplay.mp3' };
+            const trackPath = tracks[screenId];
             if (trackPath && !bgmSource.src.includes(trackPath)) {
                 bgmSource.src = trackPath;
                 bgm.load();
@@ -173,22 +169,17 @@
             const target = document.getElementById(id);
             if(target) target.classList.add('active'); 
             playMusicForScreen(id);
-
-            if(id === 'screen-menu' && myHunter) { 
-                socket.emit('requestWorldRankings');
-            }
+            if(id === 'screen-menu' && myHunter) socket.emit('requestWorldRankings');
         }
         
         function auth(type) { 
             const u = document.getElementById('u').value, p = document.getElementById('p').value;
             if(!u || !p) return alert("ENTER CREDENTIALS");
-            bgm.play().catch(() => {}); 
             socket.emit('authRequest', { type, u, p }); 
         }
 
         socket.on('authSuccess', (d) => { 
             myHunter = d;
-            // Update the UI with data from Supabase
             document.getElementById('st-name').innerText = d.username;
             document.getElementById('st-rank').innerText = d.rank; 
             document.getElementById('st-mp').innerText = `MP: ${d.mana}`;
@@ -204,8 +195,6 @@
                 <div style="display:flex; justify-content:space-between; padding:5px; border-bottom:1px solid #222; font-weight:900;">
                     <span>#${i+1} ${h.username}</span> <span>${h.manapoints} MP</span>
                 </div>`).join('');
-            
-            // Find our specific rank in the global list
             const myPos = l.findIndex(h => h.username === myHunter.username);
             if(myPos !== -1) document.getElementById('st-world-rank').innerText = `WORLD RANK: #${myPos + 1}`;
         });
@@ -223,8 +212,7 @@
         }
 
         socket.on('receiveMessage', (d) => {
-            const isWaiting = document.getElementById('screen-waiting').classList.contains('active');
-            const container = document.getElementById(isWaiting ? 'room-chat-msgs' : 'game-chat-msgs');
+            const container = document.getElementById('game-chat-msgs');
             if(container) {
                 container.innerHTML += `<div class="chat-msg"><span class="chat-rank">[${d.rank}]</span><b>${d.sender}:</b> ${d.text}</div>`;
                 container.scrollTop = container.scrollHeight;
@@ -239,10 +227,39 @@
             }
         });
 
-        // ... GAMEPLAY LOGIC (joinGate, playerAction, etc.) ...
-        // Ensure you have logic to set myRoomID when joining a gate
-        socket.on('gameStart', () => {
-            showScreen('screen-game');
+        // --- GAMEPLAY RENDER ---
+        socket.on('gameStateUpdate', (room) => {
+            const board = document.getElementById('game-board');
+            board.innerHTML = '';
+            
+            // Show Silver Gate UI if it exists
+            const silverGate = Object.values(room.world).find(g => g.type === 'silver');
+            const silverUI = document.getElementById('tc-silver-container');
+            if(silverGate) {
+                silverUI.style.display = 'block';
+                document.getElementById('silver-power').innerText = silverGate.power;
+            } else {
+                silverUI.style.display = 'none';
+            }
+
+            for (let y = 0; y < 15; y++) {
+                for (let x = 0; x < 15; x++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'cell';
+                    const gate = room.world[`${x}-${y}`];
+                    
+                    if (gate) {
+                        cell.classList.add(gate.type === 'silver' ? 'gate-silver' : 'gate-mana');
+                    }
+                    board.appendChild(cell);
+                }
+            }
+        });
+
+        socket.on('announcement', (msg) => {
+            const board = document.getElementById('announcement-board');
+            board.innerHTML += `<div style="color:var(--sys-gold); margin-bottom:5px;">[SYSTEM]: ${msg}</div>`;
+            board.scrollTop = board.scrollHeight;
         });
 
         function quitAction() { socket.emit('quitGame'); location.reload(); }
