@@ -74,20 +74,15 @@ function isPathBlocked(room, x1, y1, x2, y2) {
 }
 
 io.on('connection', (socket) => {
-    // FIX: Properly handle switching chat rooms to prevent leakage
+    // FIX: Completely leave old rooms to prevent chat leakage
     socket.on('joinChatRoom', (roomId) => {
-        // Leave all previous rooms (except the default socket ID room)
         for (const room of socket.rooms) {
-            if (room !== socket.id) {
-                socket.leave(room);
-            }
+            if (room !== socket.id) socket.leave(room);
         }
         
         if (roomId) {
             socket.join(roomId);
             socket.emit('clearChat');
-            // Optional: Confirm join to client if needed
-            // socket.emit('joinedRoom', roomId); 
         }
     });
 
@@ -97,7 +92,6 @@ io.on('connection', (socket) => {
         const rank = user ? getPlainRankLabel(user.manapoints) : "Rank E";
         const chatData = { sender: senderName, text: message, rank: rank, timestamp: new Date().toLocaleTimeString() };
         
-        // Strict room checking
         if (!roomId || roomId === 'global' || roomId === 'null') {
             io.emit('receiveMessage', chatData); 
         } else {
@@ -209,7 +203,7 @@ io.on('connection', (socket) => {
             if (room.players.length >= 2 && room.players.every(pl => pl.confirmed)) {
                 room.active = true;
                 for(let i=0; i<5; i++) spawnGate(room);
-                io.to(room.id).emit('gameStart');
+                io.to(room.id).emit('gameStart', { roomId: room.id });
                 io.to(room.id).emit('playMusic', 'gameplay.mp3');
                 broadcastGameState(room);
                 syncAllGates();
@@ -235,7 +229,7 @@ io.on('connection', (socket) => {
         };
         for(let i=0; i<5; i++) spawnGate(rooms[id]);
         socket.join(id);
-        socket.emit('gameStart');
+        socket.emit('gameStart', { roomId: id });
         socket.emit('playMusic', 'gameplay.mp3');
         broadcastGameState(rooms[id]);
     });
@@ -312,16 +306,16 @@ async function resolveConflict(room, p) {
     const aliveCount = room.players.filter(pl => pl.alive).length;
     
     if (opponent) {
-        // FIX: Added color properties to battleStart to ensure VS Screen renders
+        // FIX: Sending colors to ensure VS Screen renders
         io.to(room.id).emit('battleStart', { 
             hunter: p.name, 
             hunterMana: p.mana,
-            hunterColor: p.color, // Added Color
+            hunterColor: p.color, 
             target: opponent.name, 
             targetId: opponent.id, 
             targetMana: opponent.mana,
             targetRank: getFullRankLabel(opponent.mana),
-            targetColor: opponent.color // Added Color
+            targetColor: opponent.color 
         });
         await new Promise(r => setTimeout(r, 6000));
         let pCalcMana = p.mana, oCalcMana = opponent.mana, combatCancelled = false;
@@ -352,17 +346,17 @@ async function resolveConflict(room, p) {
 
     if (room.world[coord]) {
         const gate = room.world[coord];
-        // FIX: Added colors and standardized rank logic to battleStart
+        // FIX: Sending colors to ensure VS Screen renders
         io.to(room.id).emit('battleStart', { 
             hunter: p.name, 
             hunterMana: p.mana,
-            hunterColor: p.color, // Added Color
+            hunterColor: p.color, 
             target: `RANK ${gate.rank}`, 
             targetMana: gate.mana,
             targetRank: gate.rank,
-            targetColor: gate.color // Added Color (Rank color)
+            targetColor: gate.color 
         });
-        await new Promise(r => setTimeout(r, 6000)); // Increased to 6000 for consistency
+        await new Promise(r => setTimeout(r, 6000));
         if (p.mana >= gate.mana) {
             p.mana += gate.mana;
             delete room.world[coord];
