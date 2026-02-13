@@ -57,6 +57,7 @@
     <div id="screen-menu" class="screen">
         <div style="position:absolute; right:40px; top:20px; text-align:right;">
             <h1 id="st-name" style="font-size: 2.8rem; margin:0;">---</h1>
+            <div id="st-world-rank" style="font-size: 1.2rem; font-weight: 900; margin: 5px 0;">WORLD RANK: ---</div>
             <div id="st-rank" style="font-size: 1.8rem; font-weight: 900; margin:0;">---</div>
             <div id="st-mp" style="font-size: 1.5rem; margin:0; color:white;">MP: ---</div>
         </div>
@@ -151,7 +152,27 @@
         let myHunter = null;
         let myRoomID = null;
         let currentPass = ""; 
+        let currentWorldRankings = []; // Storage to track ranks globally
+
         const POWER_ICONS = { 'DOUBLE DAMAGE': '⚔️', 'GHOST WALK': '👣', 'NETHER SWAP': '🌀' };
+
+        // Helper to get color based on numeric rank
+        function getRankColor(index) {
+            const rank = index + 1;
+            if (rank <= 3) return 'var(--sys-gold)';
+            if (rank <= 10) return 'var(--sys-red)';
+            return 'white';
+        }
+
+        // Helper to find a user's world rank and color from the list
+        function getHunterWorldRankData(username) {
+            const index = currentWorldRankings.findIndex(h => h.username === username);
+            if (index === -1) return { rankText: "RANK: UNKNOWN", color: "white" };
+            return {
+                rankText: `WORLD RANK: ${index + 1}`,
+                color: getRankColor(index)
+            };
+        }
 
         function getGameRankLabel(m) {
             if(m >= 901) return "S RANK";
@@ -202,11 +223,34 @@
             document.getElementById('st-rank').innerText = d.rank; 
             document.getElementById('st-rank').style.color = d.color;
             document.getElementById('st-mp').innerText = `MP: ${d.mana}`;
+            
+            // Initial rank update
+            const rankData = getHunterWorldRankData(d.username);
+            document.getElementById('st-world-rank').innerText = rankData.rankText;
+            document.getElementById('st-world-rank').style.color = rankData.color;
+
             if(document.getElementById('screen-auth').classList.contains('active')) showScreen('screen-menu'); 
         });
 
         socket.on('updateWorldRankings', (l) => {
-            document.getElementById('world-rank-list').innerHTML = l.map((h, i) => `<div style="display:flex; justify-content:space-between; padding:5px; border-bottom:1px solid #222; font-weight:900;"><span>#${i+1} ${h.username}</span> <span style="color:var(--sys-blue);">${h.manapoints} MP</span></div>`).join('');
+            currentWorldRankings = l; // Store globally for other functions
+            
+            // Update Profile Page Display
+            if (myHunter) {
+                const rankData = getHunterWorldRankData(myHunter.username);
+                const stWR = document.getElementById('st-world-rank');
+                stWR.innerText = rankData.rankText;
+                stWR.style.color = rankData.color;
+            }
+
+            // Update List UI
+            document.getElementById('world-rank-list').innerHTML = l.map((h, i) => {
+                const color = getRankColor(i);
+                return `<div style="display:flex; justify-content:space-between; padding:5px; border-bottom:1px solid #222; font-weight:900; color:${color};">
+                    <span>#${i+1} ${h.username}</span> 
+                    <span style="color:var(--sys-blue);">${h.manapoints} MP</span>
+                </div>`;
+            }).join('');
         });
 
         function openOnlineLobby() { showScreen('screen-online'); socket.emit('requestGateList'); }
@@ -220,7 +264,15 @@
         socket.on('waitingRoomUpdate', (room) => {
             showScreen('screen-waiting');
             myRoomID = room.id;
-            document.getElementById('wait-slots').innerHTML = room.players.map(p => `<div style="padding:15px; border:2px solid ${p.confirmed?'lime':'#444'}; background:#000; font-weight:900;">${p.name}</div>`).join('');
+            // UPDATED: Added Ranking display under names in waiting room slots
+            document.getElementById('wait-slots').innerHTML = room.players.map(p => {
+                const rankData = getHunterWorldRankData(p.name);
+                return `
+                <div style="padding:15px; border:2px solid ${p.confirmed?'lime':'#444'}; background:#000; font-weight:900; text-align:center;">
+                    <div style="font-size: 1.2rem;">${p.name}</div>
+                    <div style="font-size: 0.8rem; color:${rankData.color}; margin-top: 5px;">${rankData.rankText}</div>
+                </div>`;
+            }).join('');
             if(room.players.length >= 2) document.getElementById('ready-btn').style.display = 'block';
         });
 
