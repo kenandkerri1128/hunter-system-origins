@@ -168,16 +168,46 @@ io.on('connection', (socket) => {
     async function handleExit(s) {
         const room = Object.values(rooms).find(r => r.players.some(p => p.id === s.id));
         if (room) {
-            const p = room.players.find(pl => pl.id === s.id);
-            if (p && room.isOnline && !p.quit && room.active) {
-                p.quit = true; p.alive = false; 
+            const pIndex = room.players.findIndex(pl => pl.id === s.id);
+            const p = room.players[pIndex];
+            
+            if (p && room.active && !p.quit) {
+                p.quit = true; 
+                p.alive = false; 
+                
+                // Subtract ranking MP
                 const { data: u } = await supabase.from('Hunters').select('manapoints').eq('username', p.name).maybeSingle();
                 if (u) await supabase.from('Hunters').update({ manapoints: Math.max(0, u.manapoints - 20) }).eq('username', p.name);
                 io.to(room.id).emit('announcement', `${p.name} ABANDONED THE QUEST. -20 MP.`);
+                
+                // Check if only one player who hasn't quit is left
+                const remainingHunters = room.players.filter(pl => !pl.quit);
+                if (remainingHunters.length === 1 && room.isOnline) {
+                    const winner = remainingHunters[0];
+                    const { data: wData } = await supabase.from('Hunters').select('manapoints').eq('username', winner.name).maybeSingle();
+                    if (wData) await supabase.from('Hunters').update({ manapoints: wData.manapoints + 20 }).eq('username', winner.name);
+                    
+                    io.to(room.id).emit('announcement', `SYSTEM: ${winner.name} IS THE LAST HUNTER REMAINING. +20 MP.`);
+                    io.to(room.id).emit('victoryEvent', { winner: winner.name });
+                    room.active = false;
+                    setTimeout(() => {
+                        io.to(room.id).emit('returnToProfile');
+                        delete rooms[room.id];
+                        syncAllGates();
+                    }, 5000);
+                    return;
+                }
             }
+            
             if (!room.active) room.players = room.players.filter(pl => pl.id !== s.id);
-            if (room.players.length === 0 || room.players.every(pl => pl.isAI)) delete rooms[room.id];
-            else broadcastGameState(room);
+            
+            if (room.players.length === 0 || room.players.every(pl => pl.isAI || pl.quit)) {
+                delete rooms[room.id];
+            } else {
+                // If it was the quitting player's turn, advance it
+                if (room.active && room.turn === pIndex) advanceTurn(room);
+                else broadcastGameState(room);
+            }
             syncAllGates();
             s.emit('returnToProfile');
         }
@@ -314,17 +344,19 @@ function triggerRespawn(room, lastPlayerId) {
     room.respawnHappened = true; 
 
     candidates.forEach(pl => { 
-        // Individual Respawn Logic: CURRENT Mana Points + Random Bonus (500-1500)
-        const resurrectionBonus = Math.floor(Math.random() * 1001) + 500;
-        pl.mana += resurrectionBonus; 
         pl.alive = true;
+        // EXCLUDE THE LAST PLAYER from the bonus rewards
+        if (pl.id !== lastPlayerId) {
+            const resurrectionBonus = Math.floor(Math.random() * 1001) + 500;
+            pl.mana += resurrectionBonus; 
+        }
     });
     
     room.world = {}; 
     room.globalTurns = 0;
     room.survivorTurns = 0; 
     for(let i=0; i<5; i++) spawnGate(room);
-    io.to(room.id).emit('announcement', `SYSTEM: QUEST FAILED. ALL HUNTERS REAWAKENED WITH MASSIVE MP BONUSES.`);
+    io.to(room.id).emit('announcement', `SYSTEM: QUEST FAILED. ALL HUNTERS REAWAKENED. BONUSES APPLIED TO FALLEN HUNTERS.`);
     broadcastGameState(room);
 }
 
@@ -365,8 +397,13 @@ function advanceTurn(room) {
     if (room.globalTurns % (room.players.length * 3) === 0) for(let i=0; i<5; i++) spawnGate(room);
     
     let attempts = 0;
-    do { room.turn = (room.turn + 1) % room.players.length; attempts++; } while (!room.players[room.turn].alive && attempts < 5);
+    // Advance to next non-dead/non-quit player
+    do { 
+        room.turn = (room.turn + 1) % room.players.length; 
+        attempts++; 
+    } while ((!room.players[room.turn].alive || room.players[room.turn].quit) && attempts < room.players.length);
     
+    // Check Silver Gate spawn logic
     if (aliveCount === 1 && !Object.values(room.world).some(g => g.rank === 'Silver')) {
         let sx, sy;
         const survivor = room.players.find(p => p.alive);
@@ -393,18 +430,60 @@ function advanceTurn(room) {
         io.to(room.id).emit('announcement', "SYSTEM: THE SILVER GATE HAS APPEARED NEARBY.");
     }
 
-    if (room.players[room.turn].isAI && room.players[room.turn].alive) {
+    const nextP = room.players[room.turn];
+    if (nextP.isAI && nextP.alive && !nextP.quit) {
         setTimeout(async () => {
             if (!rooms[room.id]) return;
-            const ai = room.players[room.turn];
             
-            let tx = Math.max(0, Math.min(14, ai.x + (Math.random() > 0.5 ? 1 : -1)));
-            let ty = Math.max(0, Math.min(14, ai.y + (Math.random() > 0.5 ? 1 : -1)));
+            let tx = nextP.x;
+            let ty = nextP.y;
+
+            if (room.mode === 'Monarch') {
+                // IMPOSSIBLE AI LOGIC
+                let targets = [];
+                // Evaluate Gates
+                Object.keys(room.world).forEach(key => {
+                    const [gx, gy] = key.split('-').map(Number);
+                    const gate = room.world[key];
+                    const dist = Math.abs(nextP.x - gx) + Math.abs(nextP.y - gy);
+                    if (dist <= 3) { // Monarch range
+                        let score = (nextP.mana >= gate.mana) ? (gate.mana * 2) - dist : -1000;
+                        targets.push({ x: gx, y: gy, score });
+                    }
+                });
+                // Evaluate Players
+                room.players.forEach(op => {
+                    if (op.alive && op.id !== nextP.id) {
+                        const dist = Math.abs(nextP.x - op.x) + Math.abs(nextP.y - op.y);
+                        if (dist <= 3) {
+                            let score = (nextP.mana > op.mana) ? (op.mana * 3) - dist : -5000;
+                            targets.push({ x: op.x, y: op.y, score });
+                        }
+                    }
+                });
+
+                targets.sort((a, b) => b.score - a.score);
+                if (targets.length > 0 && targets[0].score > -500) {
+                    tx = targets[0].x; ty = targets[0].y;
+                } else {
+                    // Hunt nearest player if no good gates
+                    const closest = room.players.filter(pl => pl.alive && pl.id !== nextP.id)
+                        .sort((a, b) => (Math.abs(nextP.x - a.x) + Math.abs(nextP.y - a.y)) - (Math.abs(nextP.x - b.x) + Math.abs(nextP.y - b.y)))[0];
+                    if (closest) {
+                        tx = nextP.x + Math.sign(closest.x - nextP.x);
+                        ty = nextP.y + Math.sign(closest.y - nextP.y);
+                    }
+                }
+            } else {
+                // Normal AI
+                tx = Math.max(0, Math.min(14, nextP.x + (Math.random() > 0.5 ? 1 : -1)));
+                ty = Math.max(0, Math.min(14, nextP.y + (Math.random() > 0.5 ? 1 : -1)));
+            }
             
-            if (!isPathBlocked(room, ai.x, ai.y, tx, ty)) {
-                ai.x = tx; ai.y = ty;
+            if (!isPathBlocked(room, nextP.x, nextP.y, tx, ty)) {
+                nextP.x = tx; nextP.y = ty;
                 if (aliveCount === 1) room.survivorTurns++;
-                await resolveConflict(room, ai);
+                await resolveConflict(room, nextP);
             }
             
             if (rooms[room.id]) advanceTurn(room);
