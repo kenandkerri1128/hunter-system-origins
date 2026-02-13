@@ -284,7 +284,7 @@
             renderRankings();
         });
 
-        // FIXED MULTIPLAYER BUTTON ACTION
+        // RE-FIXED MULTIPLAYER BUTTON ACTION
         function openOnlineLobby() {
             if(!myHunter) return;
             resetGameUI();
@@ -306,7 +306,7 @@
 
         socket.on('gameStart', () => { resetGameUI(); showScreen('screen-game'); });
 
-        // VS SCREEN LOGIC
+        // VS SCREEN LOGIC - NOW TRIGGERS ON ALL ENGAGEMENTS
         socket.on('battleInitiated', (data) => {
             const vsPanel = document.getElementById('vs-panel');
             const vsData = document.getElementById('vs-data');
@@ -314,12 +314,22 @@
             const skillArea = document.getElementById('skill-area');
 
             vsPanel.style.display = 'flex';
+            vsFill.style.transition = 'none';
             vsFill.style.width = '0%';
-            setTimeout(() => { vsFill.style.width = '100%'; }, 50);
+            
+            // Force reflow for animation
+            void vsFill.offsetWidth;
+            
+            vsFill.style.transition = '5s linear';
+            vsFill.style.width = '100%';
+
+            // HIDE EXACT MP FOR OPPONENT IN VS SCREEN
+            const isDefenderMe = data.defender.id === socket.id;
+            const defenderMPDisplay = isDefenderMe ? data.defender.mana : getShortRankLabel(data.defender.mana);
 
             vsData.innerHTML = `
                 <div style="font-weight:900; color:white;">${data.attacker.name} <span style="color:var(--sys-red)">VS</span> ${data.defender.name}</div>
-                <div style="font-size:14px; color:var(--sys-blue); margin-top:5px;">OPPONENT MANA: ${data.defender.mana}</div>
+                <div style="font-size:14px; color:var(--sys-blue); margin-top:5px;">OPPONENT: ${defenderMPDisplay}</div>
             `;
 
             skillArea.innerHTML = "";
@@ -357,7 +367,7 @@
             document.getElementById('tc-spawn').innerText = 3 - (s.globalTurns % 3);
             document.getElementById('turn-txt').innerText = isTurn ? ">> YOUR MOVE" : `>> ${s.players[s.turn].name.toUpperCase()} ACTING`;
 
-            // PARTY LIST WITH RANKS IN WAITING ROOM
+            // PARTY LIST - HIDING OPPONENT MP
             document.getElementById('party-list').innerHTML = s.players.map(p => {
                 let status = p.quit ? '(QUIT)' : (p.alive ? '' : '(KIA)');
                 let rLabel = getShortRankLabel(p.mana); 
@@ -365,14 +375,17 @@
                 const wRankIdx = currentWorldRankings.findIndex(h => h.username === p.name);
                 const wRankDisplay = wRankIdx !== -1 ? `#${wRankIdx + 1}` : '#??';
 
+                // Logical toggle: only show MP if it's the current local player
+                const mpValue = (p.id === socket.id) ? `MP: ${p.mana}` : rLabel;
+
                 return `<div class="party-member" style="color:${p.quit ? '#444' : p.color}">
                             <div style="font-size: 10px; color: #888; display:flex; justify-content: space-between;">
                                 <span>WORLD RANK: ${wRankDisplay}</span>
-                                <span>${rLabel}</span>
+                                <span>${p.id === socket.id ? rLabel : ''}</span>
                             </div>
                             <div style="display:flex; justify-content:space-between;">
                                 <span>${p.name}</span>
-                                <span style="font-size:12px;">MP: ${p.mana} ${status}</span>
+                                <span style="font-size:12px;">${mpValue} ${status}</span>
                             </div>
                         </div>`;
             }).join('');
