@@ -10,7 +10,12 @@ const DATA_FILE = './players.json';
 // --- DATABASE LOGIC ---
 let playerDB = {};
 if (fs.existsSync(DATA_FILE)) {
-    playerDB = JSON.parse(fs.readFileSync(DATA_FILE));
+    try {
+        playerDB = JSON.parse(fs.readFileSync(DATA_FILE));
+    } catch (e) {
+        console.log("Error reading DB, starting fresh.");
+        playerDB = {};
+    }
 }
 
 function saveDB() {
@@ -50,16 +55,35 @@ app.use(express.static('public'));
 io.on('connection', (socket) => {
     console.log(`Hunter Connected: ${socket.id}`);
 
-    // --- AUTHENTICATION ---
+    // --- AUTHENTICATION FIXED ---
     socket.on('authRequest', (data) => {
-        const { type, u, p } = data;
-        if (type === 'signup') {
-            if (playerDB[u]) return socket.emit('authError', "ID ALREADY EXISTS");
-            playerDB[u] = { username: u, pass: p, mana: 0, wins: 0, losses: 0, color: '#00d2ff' };
-        }
-        if (!playerDB[u] || playerDB[u].pass !== p) return socket.emit('authError', "INVALID CREDENTIALS");
+        // Use trim to avoid hidden space errors
+        const u = data.u ? data.u.trim() : "";
+        const p = data.p ? String(data.p).trim() : "";
 
-        saveDB();
+        if (data.type === 'signup') {
+            if (playerDB[u]) {
+                return socket.emit('authError', "ID ALREADY EXISTS");
+            }
+            // Initialize new player
+            playerDB[u] = { 
+                username: u, 
+                pass: p, 
+                mana: 0, 
+                wins: 0, 
+                losses: 0, 
+                color: '#00d2ff' 
+            };
+            saveDB(); // Save immediately on signup
+            console.log(`New Hunter Registered: ${u}`);
+        }
+
+        // Login Check: Ensure user exists and password matches (forced string comparison)
+        if (!playerDB[u] || String(playerDB[u].pass) !== p) {
+            console.log(`Failed login attempt for: ${u}`);
+            return socket.emit('authError', "INVALID CREDENTIALS");
+        }
+
         const hunter = playerDB[u];
         socket.emit('authSuccess', {
             username: u,
@@ -76,7 +100,6 @@ io.on('connection', (socket) => {
 
     // --- CHAT LOGIC ---
     socket.on('sendChatMessage', (data) => {
-        // Broadcast to the specific room (lobby or gate ID)
         io.to(data.room).emit('receiveChatMessage', {
             user: data.user,
             msg: data.msg
@@ -113,6 +136,8 @@ io.on('connection', (socket) => {
         socket.join(data.gateID);
         
         const hunter = playerDB[data.user];
+        if(!hunter) return;
+
         room.players.push({
             id: socket.id,
             name: hunter.username,
@@ -157,11 +182,9 @@ io.on('connection', (socket) => {
         const p = room.players[room.turn];
         if (p.id !== socket.id) return;
 
-        // Move Player
         p.x = data.tx;
         p.y = data.ty;
 
-        // Check Cell Collision
         const cellKey = `${p.x}-${p.y}`;
         const target = room.world[cellKey];
 
@@ -188,22 +211,15 @@ io.on('connection', (socket) => {
 
     function nextTurn(room) {
         room.globalTurns++;
-        
-        // Spawn Random Gate every 3 cycles
         if (room.globalTurns % (room.players.length * 3) === 0) {
             spawnGate(room);
         }
 
-        // Check Survivors
-        const alivePlayers = room.players.filter(p => p.alive && !p.quit);
+        const alivePlayers = room.players.filter(p => p.alive);
         
         if (alivePlayers.length === 1) {
-            const survivor = alivePlayers[0];
-            // Check for Silver Gate
             const silverExists = Object.values(room.world).some(g => g.rank === 'Silver');
-            if (!silverExists) {
-                spawnSilverGate(room);
-            }
+            if (!silverExists) spawnSilverGate(room);
         }
 
         if (alivePlayers.length === 0) {
@@ -211,10 +227,9 @@ io.on('connection', (socket) => {
             return;
         }
 
-        // Standard Turn Increment
         do {
             room.turn = (room.turn + 1) % room.players.length;
-        } while (!room.players[room.turn].alive || room.players[room.turn].quit);
+        } while (!room.players[room.turn].alive);
 
         broadcastGameState(room);
     }
@@ -231,8 +246,6 @@ io.on('connection', (socket) => {
             { r: 'B', m: 550, c: '#ff9900' },
             { r: 'A', m: 750, c: '#ff00ff' }
         ];
-        
-        // Add Red Gates if respawn happened
         if (room.respawnHappened) ranks.push({ r: 'S', m: 950, c: '#ff0000' });
 
         const res = ranks[Math.floor(Math.random() * ranks.length)];
@@ -242,30 +255,23 @@ io.on('connection', (socket) => {
     function spawnSilverGate(room) {
         const x = Math.floor(Math.random() * 15);
         const y = Math.floor(Math.random() * 15);
-        const power = Math.floor(Math.random() * 501) + 500; // 500 to 1000
+        const power = Math.floor(Math.random() * 501) + 500;
         room.world[`${x}-${y}`] = { type: 'gate', rank: 'Silver', mana: power, color: '#c0c0c0' };
-        io.to(room.id).emit('announcement', `A SILVER GATE HAS APPEARED! DEFEAT IT TO WIN.`);
+        io.to(room.id).emit('announcement', `A SILVER GATE HAS APPEARED!`);
     }
 
     function triggerRespawn(room, lastPlayerId) {
-        const candidates = room.players.filter(p => !p.quit);
-        if (candidates.length === 0) { delete rooms[room.id]; return; }
-        
         room.respawnHappened = true; 
-
-        candidates.forEach(pl => { 
+        room.players.forEach(pl => { 
             if (pl.id !== lastPlayerId) {
-                const resurrectionBonus = Math.floor(Math.random() * 1001) + 500;
-                pl.mana += resurrectionBonus; 
+                pl.mana += Math.floor(Math.random() * 1001) + 500; 
             }
             pl.alive = true;
-            pl.rankLabel = getShortRankLabel(pl.mana);
         });
-        
         room.world = {}; 
         room.globalTurns = 0;
-        const lastPlayerIdx = room.players.findIndex(pl => pl.id === lastPlayerId);
-        room.turn = lastPlayerIdx;
+        const lastIdx = room.players.findIndex(pl => pl.id === lastPlayerId);
+        room.turn = lastIdx;
 
         for(let i=0; i<5; i++) spawnGate(room);
         io.to(room.id).emit('announcement', `SYSTEM: QUEST FAILED. ALL HUNTERS REAWAKENED.`);
@@ -273,17 +279,12 @@ io.on('connection', (socket) => {
     }
 
     function broadcastGameState(room) { 
-        const sanitizedPlayers = room.players.map(p => {
-            const shortRank = getShortRankLabel(p.mana);
-            return {
-                ...p,
-                rankLabel: shortRank,
-                displayName: `${p.name} (${shortRank})` 
-            };
-        });
-        
-        const state = { ...room, players: sanitizedPlayers };
-        io.to(room.id).emit('gameStateUpdate', state); 
+        const sanitizedPlayers = room.players.map(p => ({
+            ...p,
+            rankLabel: getShortRankLabel(p.mana),
+            displayName: `${p.name} (${getShortRankLabel(p.mana)})` 
+        }));
+        io.to(room.id).emit('gameStateUpdate', { ...room, players: sanitizedPlayers }); 
     }
 
     function updateGateList() {
@@ -302,7 +303,7 @@ io.on('connection', (socket) => {
     }
 
     socket.on('disconnect', () => {
-        // Handle cleaning up rooms on disconnect
+        // Clean up logic
     });
 });
 
