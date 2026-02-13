@@ -121,6 +121,9 @@
         const bgm = document.getElementById('sys-bgm');
         const bgmSource = document.getElementById('bgm-source');
 
+        // Added Keyboard Listeners for Login
+        document.getElementById('p').addEventListener('keypress', (e) => { if(e.key === 'Enter') auth('login'); });
+
         function playMusicForScreen(screenId) {
             const tracks = { 'screen-auth': '/music/menu.mp3', 'screen-menu': '/music/menu.mp3', 'screen-game': '/music/gameplay.mp3' };
             const trackPath = tracks[screenId];
@@ -147,12 +150,16 @@
 
         socket.on('authSuccess', (d) => { 
             myHunter = d;
+            updateHUD(d);
+            showScreen('screen-menu'); 
+        });
+
+        function updateHUD(d) {
             document.getElementById('st-name').innerText = d.username;
             document.getElementById('st-rank').innerText = d.rank; 
             document.getElementById('st-mp').innerText = `MP: ${d.mana}`;
             document.getElementById('st-stats').innerText = `WINS: ${d.wins || 0} | LOSSES: ${d.losses || 0}`;
-            showScreen('screen-menu'); 
-        });
+        }
 
         socket.on('authError', (msg) => alert(msg));
 
@@ -197,6 +204,14 @@
             const board = document.getElementById('game-board');
             board.innerHTML = '';
             
+            // Update local hunter stats if changed in the room state
+            const localState = room.players.find(p => p.username === myHunter.username);
+            if(localState) {
+                myHunter.mana = localState.mana;
+                document.getElementById('st-mp').innerText = `MP: ${localState.mana}`;
+                document.getElementById('st-rank').innerText = localState.rankLabel;
+            }
+
             const silverGate = Object.values(room.world).find(g => g.type === 'silver');
             const silverUI = document.getElementById('tc-silver-container');
             if(silverGate) {
