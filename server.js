@@ -216,7 +216,7 @@ io.on('connection', (socket) => {
             players: [
                 { id: socket.id, name: data.user, ...corners[0], mana: playerMana, rankLabel: getFullRankLabel(playerMana), alive: true, isAI: false, color: PLAYER_COLORS[0], quit: false, powerUp: null },
                 { id: 'ai1', name: AI_NAMES[1], ...corners[1], mana: 200, rankLabel: "Lower D-Rank", alive: true, isAI: true, color: PLAYER_COLORS[1], quit: false, powerUp: null },
-                { id: 'ai2', name: AI_NAMES[2], ...corners[2], mana: 200, rankLabel: "Lower D-Rank", alive: true, isAI: true, color: PLAYER_COLORS[2], quit: false, powerUp: null },
+                { id: 'ai2', name: AI_NAMES[2], ...corners[2], mana: 233, rankLabel: "Higher D-Rank", alive: true, isAI: true, color: PLAYER_COLORS[2], quit: false, powerUp: null },
                 { id: 'ai3', name: AI_NAMES[3], ...corners[3], mana: 200, rankLabel: "Lower D-Rank", alive: true, isAI: true, color: PLAYER_COLORS[3], quit: false, powerUp: null }
             ],
             world: {}
@@ -306,7 +306,7 @@ async function resolveConflict(room, p) {
             target: opponent.name, 
             targetId: opponent.id, 
             targetMana: opponent.mana,
-            targetRank: getPlainRankLabel(opponent.mana)
+            targetRank: getFullRankLabel(opponent.mana)
         });
         await new Promise(r => setTimeout(r, 6000));
         let pCalcMana = p.mana, oCalcMana = opponent.mana, combatCancelled = false;
@@ -368,7 +368,7 @@ async function resolveConflict(room, p) {
                 }
             }
         } else {
-            if (aliveCount === 1) triggerRespawn(room, p.id); 
+            if (aliveCount === 1) triggerRespawn(room, p.id);
             else { p.alive = false; if (!p.isAI && room.isOnline) recordLoss(p.name, gate.mana); }
         }
     }
@@ -414,8 +414,18 @@ function spawnGate(room) {
 }
 
 function broadcastGameState(room) { 
-    const sanitizedPlayers = room.players.map(p => ({ ...p, rankLabel: getFullRankLabel(p.mana) }));
-    io.to(room.id).emit('gameStateUpdate', { ...room, players: sanitizedPlayers }); 
+    // SECURITY UPDATE: Only show MP to the owner. Hide MP for others.
+    const roomClients = io.sockets.adapter.rooms.get(room.id);
+    if (roomClients) {
+        roomClients.forEach(socketId => {
+            const sanitizedPlayers = room.players.map(p => ({
+                ...p,
+                mana: (p.id === socketId) ? p.mana : null, // Hide exact MP
+                rankLabel: getFullRankLabel(p.mana) // Still show the Rank Label
+            }));
+            io.to(socketId).emit('gameStateUpdate', { ...room, players: sanitizedPlayers });
+        });
+    }
 }
 
 function advanceTurn(room) {
@@ -426,6 +436,8 @@ function advanceTurn(room) {
     if (room.globalTurns % (room.players.length * 3) === 0) for(let i=0; i<5; i++) spawnGate(room);
     let attempts = 0;
     do { room.turn = (room.turn + 1) % room.players.length; attempts++; } while (!room.players[room.turn].alive && attempts < 10);
+    
+    // SILVER GATE SPAWN LOGIC
     if (aliveCount === 1 && !Object.values(room.world).some(g => g.rank === 'Silver')) {
         let sx, sy, validPos = false;
         const survivor = room.players.find(p => p.alive);
@@ -438,6 +450,7 @@ function advanceTurn(room) {
         room.world[`${sx}-${sy}`] = { rank: 'Silver', color: '#fff', mana: Math.floor(Math.random()*10000)+500 };
         io.to(room.id).emit('announcement', "SYSTEM: THE SILVER GATE HAS APPEARED NEARBY.");
     }
+    
     const nextPlayer = room.players[room.turn];
     if (nextPlayer.isAI && nextPlayer.alive) {
         setTimeout(async () => {
