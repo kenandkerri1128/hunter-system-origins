@@ -6,14 +6,12 @@ const path = require('path');
 const { createClient } = require('@supabase/supabase-js'); 
 
 // --- DATABASE CONNECTION ---
-// Using the Legacy Project URL and Secret Key you provided
 const supabaseUrl = 'https://wfsuxqgvshrhqfvnkzdx.supabase.co'; 
 const supabaseKey = 'sb_secret_zJcSVUKBPb1ZPOYuRGYOjg_6H090DFK';
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 app.use(express.static(path.join(__dirname, 'public')));
 
-// --- GAME DATA ---
 const rooms = {};
 
 // --- RANKING HELPERS ---
@@ -91,13 +89,16 @@ io.on('connection', (socket) => {
         const { type, u, p } = data;
         try {
             if (type === 'signup') {
-                const { data: existing } = await supabase.from('hunters').select('username').eq('username', u);
+                // FIXED: Changed 'hunters' to 'Hunters'
+                const { data: existing } = await supabase.from('Hunters').select('username').eq('username', u);
                 if (existing && existing.length > 0) return socket.emit('authError', "HUNTER ID ALREADY EXISTS");
-                await supabase.from('hunters').insert([{ username: u, password: p, mana: 20, wins: 0, losses: 0 }]);
+                // FIXED: mana column is actually 'manapoints'
+                await supabase.from('Hunters').insert([{ username: u, password: p, manapoints: 20, wins: 0, losses: 0 }]);
             }
 
+            // FIXED: Changed 'hunters' to 'Hunters'
             const { data: users, error } = await supabase
-                .from('hunters')
+                .from('Hunters')
                 .select('*')
                 .eq('username', u)
                 .eq('password', p);
@@ -106,8 +107,8 @@ io.on('connection', (socket) => {
                 const user = users[0];
                 socket.emit('authSuccess', {
                     username: user.username,
-                    mana: user.mana,
-                    rank: getDetailedRank(user.mana),
+                    mana: user.manapoints, // FIXED: column name
+                    rank: getDetailedRank(user.manapoints),
                     color: '#00d2ff',
                     wins: user.wins,
                     losses: user.losses
@@ -122,10 +123,11 @@ io.on('connection', (socket) => {
 
     socket.on('requestWorldRankings', async () => {
         try {
+            // FIXED: Changed 'hunters' to 'Hunters' and 'mana' to 'manapoints'
             const { data: list } = await supabase
-                .from('hunters')
-                .select('username, mana')
-                .order('mana', { ascending: false })
+                .from('Hunters')
+                .select('username, manapoints')
+                .order('manapoints', { ascending: false })
                 .limit(10);
             socket.emit('updateWorldRankings', list || []);
         } catch (err) {
@@ -142,9 +144,9 @@ io.on('connection', (socket) => {
 
         if (gate && gate.type === 'silver') {
             if (player.mana >= gate.power) {
-                io.to(roomId).emit('announcement', `${player.name} HAS DEFEATED THE SILVER GATE! THE ONLY TRUE HUNTER!`);
+                io.to(roomId).emit('announcement', `${player.name} HAS DEFEATED THE SILVER GATE!`);
             } else {
-                io.to(roomId).emit('announcement', `${player.name} FELL TO THE SILVER GATE. ALL PLAYERS RESPAWNED!`);
+                io.to(roomId).emit('announcement', `${player.name} FELL. ALL PLAYERS RESPAWNED!`);
                 delete room.world[gateKey];
                 room.players.forEach(p => { p.alive = true; p.quit = false; });
                 broadcastGameState(room);
@@ -155,8 +157,9 @@ io.on('connection', (socket) => {
     socket.on('sendMessage', async (data) => {
         const { roomId, message, senderName } = data;
         try {
-            const { data: users } = await supabase.from('hunters').select('mana').eq('username', senderName);
-            const rank = (users && users.length > 0) ? getDetailedRank(users[0].mana) : "E-Rank";
+            // FIXED: Changed 'hunters' to 'Hunters'
+            const { data: users } = await supabase.from('Hunters').select('manapoints').eq('username', senderName);
+            const rank = (users && users.length > 0) ? getDetailedRank(users[0].manapoints) : "E-Rank";
             if (!roomId) {
                 io.emit('receiveGlobalMessage', { sender: senderName, text: message });
             } else {
