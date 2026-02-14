@@ -11,39 +11,45 @@
         h1, h2, h3 { font-family: 'Orbitron'; font-style: italic; color: var(--sys-blue); text-shadow: 0 0 10px var(--sys-blue); }
         .screen { display: none; flex-direction: column; align-items: center; justify-content: center; height: 100vh; width: 100vw; position: absolute; }
         .active { display: flex !important; }
+        
+        /* Buttons & Inputs */
         .sys-btn { background: #000; border: 2px solid var(--sys-blue); color: var(--sys-blue); padding: 10px 40px; font-family: 'Orbitron'; cursor: pointer; margin: 10px; font-weight: 900; clip-path: polygon(15% 0, 100% 0, 85% 100%, 0 100%); width: 250px; text-transform: uppercase; transition: 0.2s; }
         .sys-btn:hover { background: var(--sys-blue); color: #000; }
         .sys-input { padding: 15px; background: #000; border: 1px solid var(--sys-blue); color: #fff; width: 300px; margin: 10px; font-family: 'Orbitron'; outline: none; }
         
+        /* Admin Glow - Restored */
         .admin-glow { color: var(--sys-gold) !important; text-shadow: 0 0 15px var(--sys-gold), 0 0 5px #fff; font-weight: 900; animation: admin-pulse 2s infinite ease-in-out; }
         @keyframes admin-pulse { 0%, 100% { filter: brightness(1); } 50% { filter: brightness(1.5) drop-shadow(0 0 10px var(--sys-gold)); } }
-        
         .admin-chat-msg { background: rgba(255, 204, 0, 0.1); border-left: 3px solid var(--sys-gold); padding-left: 5px; margin: 2px 0; }
 
+        /* Board - Fixed 15x15 Map */
         #game-board { display: grid; grid-template-columns: repeat(15, 42px); gap: 2px; background: #111; border: 4px solid var(--sys-blue); }
-        .cell { width: 42px; height: 42px; background: #000; position: relative; border: 0.5px solid #1a1a1a; }
+        .cell { width: 42px; height: 42px; background: #000; position: relative; border: 0.5px solid #1a1a1a; box-sizing: border-box; }
         .valid-move { box-shadow: inset 0 0 0 3px var(--sys-blue); cursor: pointer; z-index: 5; }
         
+        /* Characters */
         .humanoid { position: absolute; bottom: 5px; left: 50%; transform: translateX(-50%); width: 24px; height: 30px; z-index: 10; pointer-events: none; }
         .h-head { width: 10px; height: 10px; border-radius: 50%; border: 1px solid white; margin: 0 auto; }
         .h-body { width: 20px; height: 15px; border: 1px solid white; border-radius: 4px 4px 0 0; }
         .name-tag { position: absolute; top: -22px; left: 50%; transform: translateX(-50%); font-size: 10px; white-space: nowrap; font-weight: 900; background: #000; border: 1px solid #444; padding: 1px 4px; display: flex; flex-direction: column; align-items: center; z-index: 20; }
         
+        /* Sidebars */
         .hud-left { width: 280px; background: rgba(0,0,0,0.9); border-right: 2px solid var(--sys-blue); padding: 15px; display: flex; flex-direction: column; height: 650px; overflow-y: auto; }
-        .rank-row { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid #222; font-size: 13px; font-weight: 900; }
         .sidebar { width: 350px; border: 2px solid var(--sys-blue); background: #000; padding: 15px; height: 650px; display: flex; flex-direction: column; }
+        .party-member { font-size: 16px; font-weight: 900; margin-bottom: 8px; border-bottom: 1px solid #222; padding: 5px 0; }
         
+        /* Combat Panel */
         #vs-panel { display: none; background: rgba(20,0,0,0.9); border: 2px solid var(--sys-red); padding: 10px; margin-bottom: 15px; flex-direction: column; align-items: center; box-shadow: 0 0 15px var(--sys-red); width: 100%; box-sizing: border-box; }
-        .v-fill { height: 6px; background: var(--sys-red); width: 0%; transition: 5s linear; margin-top: 10px; }
+        .v-fill { height: 6px; background: var(--sys-red); width: 0%; transition: 5.8s linear; margin-top: 10px; }
         
+        /* Global Chat */
         #global-chat-container { width: 400px; height: 200px; border: 2px solid var(--sys-blue); background: rgba(0,0,0,0.8); display: none; flex-direction: column; margin-top: 10px; z-index: 2000; }
         #chat-messages { flex-grow: 1; overflow-y: auto; padding: 5px; font-size: 12px; font-family: 'Orbitron'; }
         .chat-input-row { display: flex; border-top: 1px solid var(--sys-blue); }
         .chat-input-row input { flex-grow: 1; background: #000; border: none; color: white; padding: 10px; outline: none; }
         .chat-input-row button { background: var(--sys-blue); border: none; padding: 5px 15px; cursor: pointer; font-weight: 900; }
         
-        .gate-item { padding: 15px; border-bottom: 1px solid #333; display: flex; justify-content: space-between; align-items: center; cursor: pointer; transition: 0.2s; }
-        .gate-item:hover { background: rgba(0, 210, 255, 0.1); }
+        /* Victory Screen */
         #victory-screen { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.95); z-index: 10000; flex-direction: column; align-items: center; justify-content: center; text-align: center;}
     </style>
 </head>
@@ -52,9 +58,9 @@
     <audio id="bgm" loop></audio>
 
     <div id="victory-screen">
-        <h1 style="font-size: 5rem; color: var(--sys-gold);">QUEST COMPLETE</h1>
+        <h1 style="font-size: 5rem; color: var(--sys-gold); text-shadow: 0 0 20px var(--sys-gold);">QUEST COMPLETE</h1>
         <h2 id="winner-name" style="font-size: 3rem; color: #fff;">---</h2>
-        <div id="mp-deduction-info" style="color: var(--sys-red); font-family: 'Orbitron'; margin-bottom: 10px;"></div>
+        <div id="mp-deduction-info" style="color: var(--sys-red); font-family: 'Orbitron'; font-size: 1.5rem; margin-bottom: 10px;"></div>
         <p id="return-timer" style="color: var(--sys-blue); font-family: 'Orbitron';">Returning to Profile in 5...</p>
     </div>
 
@@ -85,99 +91,69 @@
             
             <div id="admin-panel" style="display:none; flex-direction:column; gap:5px; margin-top:15px; border:2px solid var(--sys-red); padding:10px; background:rgba(20,0,0,0.8); text-align:left;">
                 <h3 style="color:var(--sys-red); margin:0; font-size:12px;">ADMIN CONTROLS</h3>
-                <div style="display:flex; gap:5px;">
-                    <input id="admin-target" class="sys-input" placeholder="PLAYER NAME" style="width:120px; height:15px; padding:8px; font-size:10px; margin:2px 0;">
-                    <button class="sys-btn" style="width:70px; height:33px; padding:0; font-size:10px; border-color:var(--sys-red); margin:2px 0;" onclick="doAdmin('kick')">KICK</button>
-                </div>
-                <div style="display:flex; gap:5px;">
-                    <input id="admin-watch-target" class="sys-input" placeholder="PLAYER NAME" style="width:120px; height:15px; padding:8px; font-size:10px; margin:2px 0;">
-                    <button class="sys-btn" style="width:70px; height:33px; padding:0; font-size:10px; border-color:var(--sys-gold); margin:2px 0;" onclick="doAdmin('spectate')">WATCH</button>
-                </div>
-                <div style="display:flex; gap:5px;">
-                    <input id="admin-broadcast" class="sys-input" placeholder="GLOBAL MSG" style="width:120px; height:15px; padding:8px; font-size:10px; margin:2px 0;">
-                    <button class="sys-btn" style="width:70px; height:33px; padding:0; font-size:10px; margin:2px 0;" onclick="doAdmin('broadcast')">SEND</button>
-                </div>
+                <input id="admin-target" class="sys-input" placeholder="KICK PLAYER" style="width:120px; height:15px; font-size:10px;">
+                <button class="sys-btn" style="width:145px; height:33px; font-size:10px; border-color:var(--sys-red);" onclick="doAdmin('kick')">KICK HUNTER</button>
+                <input id="admin-watch-target" class="sys-input" placeholder="WATCH PLAYER" style="width:120px; height:15px; font-size:10px;">
+                <button class="sys-btn" style="width:145px; height:33px; font-size:10px; border-color:var(--sys-gold);" onclick="doAdmin('spectate')">WATCH QUEST</button>
+                <input id="admin-broadcast" class="sys-input" placeholder="GLOBAL MSG" style="width:120px; height:15px; font-size:10px;">
+                <button class="sys-btn" style="width:145px; height:33px; font-size:10px;" onclick="doAdmin('broadcast')">BROADCAST</button>
             </div>
         </div>
 
         <div style="border:2px solid var(--sys-blue); width:400px; padding:20px; background:rgba(0,0,0,0.8);">
-            <h3>WORLD RANKINGS (HuP)</h3>
+            <h3>WORLD RANKINGS</h3>
             <div id="world-rank-list" style="max-height: 300px; overflow-y: auto;"></div>
-            <button id="see-more-ranks" class="see-more-btn" onclick="toggleRankLimit()" style="background: transparent; border: 1px solid var(--sys-blue); color: var(--sys-blue); width: 100%; padding: 5px; cursor: pointer; font-family: 'Orbitron'; font-size: 10px; font-weight: 900; margin-top: 5px;">SEE MORE</button>
+            <button class="sys-btn" style="width:100%; font-size:10px; height:30px; border-color:var(--sys-blue);" onclick="toggleRankLimit()">TOGGLE LIMIT</button>
         </div>
 
         <div id="menu-chat-anchor" style="height: 210px; width: 400px; margin-top: 10px;"></div>
-
         <button class="sys-btn" onclick="showScreen('screen-difficulty')">SINGLE PLAYER</button>
         <button class="sys-btn" onclick="openOnlineLobby()">MULTIPLAYER</button>
         <button class="sys-btn" style="border-color:#555;" onclick="doLogout()">LOGOUT</button>
     </div>
 
     <div id="screen-lobby" class="screen">
-        <h2 style="margin-bottom: 20px;">GATE SELECTION</h2>
-        <div style="display:flex; gap:10px; margin-bottom: 10px;">
-            <input type="text" id="gate-name-input" class="sys-input" placeholder="GATE NAME" style="width: 250px;">
-            <button class="sys-btn" style="width:auto;" onclick="createGate()">OPEN GATE</button>
-        </div>
-        <div style="display: flex; gap: 20px;">
-            <div id="gate-list" style="width: 600px; height: 400px; border: 2px solid var(--sys-blue); margin-bottom: 20px; overflow-y: auto; background: rgba(0,0,0,0.8);"></div>
-            <div id="lobby-chat-anchor" style="width: 400px; height: 400px; border: 1px solid var(--sys-blue);"></div>
-        </div>
+        <h2>GATE SELECTION</h2>
+        <input type="text" id="gate-name-input" class="sys-input" placeholder="GATE NAME">
+        <button class="sys-btn" onclick="createGate()">OPEN GATE</button>
+        <div id="gate-list" style="width: 600px; height: 300px; border: 2px solid var(--sys-blue); overflow-y: auto; background: rgba(0,0,0,0.8);"></div>
+        <div id="lobby-chat-anchor" style="width: 400px; height: 200px; margin-top:10px;"></div>
         <button class="sys-btn" onclick="showScreen('screen-menu')">BACK</button>
     </div>
 
-    <div id="screen-waiting" class="screen">
-        <h2 id="waiting-title">WAITING FOR HUNTERS...</h2>
-        <div id="waiting-list" style="width: 500px; min-height: 200px; border: 2px solid var(--sys-blue); padding: 20px; margin: 20px; background: rgba(0,0,0,0.8);"></div>
-        <div id="waiting-chat-anchor" style="width: 500px; height: 200px; margin-bottom: 10px;"></div>
-        <button class="sys-btn" id="btn-ready" onclick="playerConfirm()">READY / START</button>
-        <button class="sys-btn" style="border-color:#555" onclick="leaveWaitingRoom()">LEAVE</button>
-    </div>
-
-    <div id="screen-difficulty" class="screen">
-        <h2>QUEST TYPE</h2>
-        <button class="sys-btn" onclick="startAI('Easy')">EASY</button>
-        <button class="sys-btn" onclick="startAI('Hard')">HARD</button>
-        <button class="sys-btn" onclick="startAI('Monarch')" style="color:red; border-color:red;">MONARCH (+5 MP)</button>
-        <button class="sys-btn" onclick="showScreen('screen-menu')">BACK</button>
-    </div>
-
-    <div id="screen-game" class="screen" style="flex-direction: row; justify-content: center; align-items: center;">
+    <div id="screen-game" class="screen" style="flex-direction: row;">
         <div class="hud-left">
-            <h3 id="turn-txt" style="color:var(--sys-gold); font-size: 14px;">>> SYSTEM TURN</h3>
+            <h3 id="turn-txt" style="color:var(--sys-gold);">>> SYSTEM TURN</h3>
             <div id="party-list"></div>
             <div id="game-chat-anchor" style="height: 300px; width: 100%; margin-top:20px;"></div>
         </div>
-        <div style="display:flex; gap:20px; padding: 0 20px;">
-            <div id="game-board-container" style="display: flex; flex-direction: column; align-items: center;">
-                <div id="game-board"></div>
-                <div id="vs-panel">
-                    <span id="vs-title" style="color:var(--sys-red); font-weight:900;">COMBAT INITIATED</span>
-                    <div id="vs-data" style="font-size: 16px; text-align: center; margin: 10px 0;"></div>
-                    <div id="skill-area" style="min-height: 40px; display: flex; flex-direction: column; align-items: center; justify-content: width: 100%;"></div>
-                    <div style="width:100%; height:4px; background:#111;"><div class="v-fill" id="vs-fill"></div></div>
-                </div>
-                <div id="announcement-board" style="width: 100%; min-height: 60px; background:#050505; font-size:11px; margin-top:10px; overflow-y:auto; padding:10px; border:1px solid #222;"></div>
-                <button class="sys-btn" style="width:100%; height:45px; font-size:12px; margin-top:10px;" onclick="quitAction()">QUIT QUEST</button>
+        <div style="display:flex; flex-direction: column; align-items: center; padding: 20px;">
+            <div id="game-board"></div>
+            <div id="vs-panel">
+                <span id="vs-title" style="color:red; font-weight:900;">COMBAT INITIATED</span>
+                <div id="vs-data" style="font-size: 18px; text-align: center; margin: 10px 0;"></div>
+                <div style="width:100%; height:4px; background:#111;"><div class="v-fill" id="vs-fill"></div></div>
             </div>
+            <div id="announcement-board" style="width:100%; background:#050505; min-height:80px; font-size:12px; margin-top:10px; padding:10px; border:1px solid #222; overflow-y:auto;"></div>
+            <button class="sys-btn" style="width:100%;" onclick="quitAction()">QUIT QUEST</button>
         </div>
     </div>
 
     <script>
         const socket = io();
-        let myHunter = null;
-        let myRoomID = 'global';
-        let currentPass = ""; 
-        let currentWorldRankings = [];
-        let showingFullRankings = false;
-        let currentGateID = null; 
+        let myHunter = null, myRoomID = 'global', currentPass = "", currentBGM = "", currentWorldRankings = [], showingFullRankings = false;
 
-        const POWER_ICONS = { 'DOUBLE DAMAGE': '⚔️', 'GHOST WALK': '👣', 'NETHER SWAP': '🌀' };
+        function playMusic(track) {
+            const audio = document.getElementById('bgm');
+            if (currentBGM === track) return;
+            currentBGM = track;
+            audio.src = `/music/${track}`;
+            audio.play().catch(e => {});
+        }
 
         // AUTH & NAVIGATION
         function auth(type) {
-            const u = document.getElementById('u').value;
-            const p = document.getElementById('p').value;
+            const u = document.getElementById('u').value, p = document.getElementById('p').value;
             if(!u || !p) return;
             currentPass = p;
             socket.emit('authRequest', { type, u, p });
@@ -189,33 +165,31 @@
             document.getElementById('st-rank').innerText = d.rank;
             document.getElementById('st-rank').style.color = d.color;
             document.getElementById('st-mp').innerText = `HuP: ${d.mana}`;
-            document.getElementById('st-stats').innerText = `WINS: ${d.wins || 0} | LOSSES: ${d.losses || 0}`;
-            document.getElementById('st-world-rank').innerText = `WORLD RANK: #${d.worldRank || '--'}`;
+            document.getElementById('st-stats').innerText = `WINS: ${d.wins} | LOSSES: ${d.losses}`;
+            document.getElementById('st-world-rank').innerText = `WORLD RANK: #${d.worldRank}`;
             document.getElementById('admin-panel').style.display = d.isAdmin ? 'flex' : 'none';
+            if(d.isAdmin) document.getElementById('st-name').classList.add('admin-glow');
             showScreen('screen-menu');
         });
 
         socket.on('authError', (msg) => {
             document.getElementById('auth-msg').innerText = msg;
-            if(msg.includes("LOGOUT")) location.reload();
+            if(msg.includes("FORCED LOGOUT")) { alert(msg); location.reload(); }
         });
 
         function showScreen(id) {
             document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
-            const target = document.getElementById(id);
-            if(target) target.classList.add('active');
-            
-            if(id === 'screen-menu') { myRoomID = 'global'; moveChat('menu-chat-anchor'); }
-            else if (id === 'screen-lobby') { myRoomID = 'global'; moveChat('lobby-chat-anchor'); }
-            else if (id === 'screen-game') moveChat('game-chat-anchor');
-            else if (id === 'screen-waiting') moveChat('waiting-chat-anchor');
+            document.getElementById(id).classList.add('active');
+            if(id === 'screen-menu') { moveChat('menu-chat-anchor'); playMusic('menu.mp3'); myRoomID = 'global'; }
+            else if(id === 'screen-lobby') { moveChat('lobby-chat-anchor'); }
+            else if(id === 'screen-game') { moveChat('game-chat-anchor'); playMusic('gameplay.mp3'); }
         }
 
-        // CHAT SYSTEM
+        // CHAT
         function moveChat(anchorId) {
             const chat = document.getElementById('global-chat-container');
-            const anchor = document.getElementById(anchorId);
-            if (chat && anchor) { chat.style.display = 'flex'; anchor.appendChild(chat); }
+            chat.style.display = 'flex';
+            document.getElementById(anchorId).appendChild(chat);
         }
 
         function sendChatMessage() {
@@ -230,42 +204,40 @@
             const chatBox = document.getElementById('chat-messages');
             const msg = document.createElement('div');
             if(data.isAdmin) msg.className = "admin-chat-msg";
-            msg.innerHTML = `<b>[${data.rank}] ${data.isAdmin?'👑':''}${data.sender}:</b> ${data.text}`;
+            const nameClass = data.isAdmin ? "class='admin-glow'" : "";
+            msg.innerHTML = `<b ${nameClass}>[${data.rank}] ${data.sender}:</b> ${data.text}`;
             chatBox.appendChild(msg);
             chatBox.scrollTop = chatBox.scrollHeight;
         });
 
-        socket.on('joinedRoom', (roomId) => { myRoomID = roomId; });
+        // WORLD RANKINGS - Restored Color Scheme
+        socket.on('updateWorldRankings', (l) => {
+            currentWorldRankings = l;
+            const list = document.getElementById('world-rank-list');
+            list.innerHTML = l.slice(0, showingFullRankings?100:10).map((h, i) => {
+                let color = '#fff';
+                if(i < 3) color = 'var(--sys-gold)';
+                else if(i < 10) color = 'var(--sys-red)';
+                const adminClass = h.isAdmin ? "class='admin-glow'" : "";
+                return `<div style="display:flex; justify-content:space-between; padding:5px; border-bottom:1px solid #222; color:${color}; font-weight:900;">
+                    <span ${adminClass}>#${i+1} ${h.username}</span><span>${h.hunterpoints} HuP</span>
+                </div>`;
+            }).join('');
+        });
 
-        // LOBBY & GAME LOGIC
+        function toggleRankLimit() { showingFullRankings = !showingFullRankings; socket.emit('requestWorldRankings'); }
+
+        // GAMEPLAY ACTIONS
+        function quitAction() { socket.emit('quitGame'); }
+        function startAI(diff) { socket.emit('startSoloAI', { user: myHunter.username, diff }); }
         function openOnlineLobby() { showScreen('screen-lobby'); socket.emit('requestGateList'); }
         function createGate() {
             const name = document.getElementById('gate-name-input').value;
-            if(!name) return alert("ENTER GATE NAME");
-            socket.emit('createGate', { host: myHunter.username, name: name });
+            if(name) socket.emit('createGate', { host: myHunter.username, name });
         }
         function joinGate(id) { socket.emit('joinGate', { gateID: id, user: myHunter.username }); }
-        function playerConfirm() { if(currentGateID) socket.emit('playerConfirm', { gateID: currentGateID }); }
-        function leaveWaitingRoom() { socket.emit('quitGame'); showScreen('screen-lobby'); }
-        function startAI(diff) { resetGameUI(); socket.emit('startSoloAI', { user: myHunter.username, diff }); }
-        function quitAction() { socket.emit('quitGame'); }
 
-        socket.on('updateGateList', (list) => {
-            const container = document.getElementById('gate-list');
-            container.innerHTML = list.map(g => `<div class="gate-item" onclick="joinGate('${g.id}')"><span>${g.name}</span><span style="color:var(--sys-blue)">${g.count}/4 HUNTERS</span></div>`).join('');
-        });
-
-        socket.on('waitingRoomUpdate', (room) => {
-            currentGateID = room.id;
-            showScreen('screen-waiting');
-            document.getElementById('waiting-title').innerText = `GATE: ${room.name}`;
-            const container = document.getElementById('waiting-list');
-            container.innerHTML = room.players.map(p => `<div style="padding:10px; border-bottom:1px solid #333; display:flex; justify-content:space-between; color:${p.color}"><span>${p.name} (${p.worldsRankLabel})</span><span>${p.confirmed ? 'READY' : 'WAITING'}</span></div>`).join('');
-            const me = room.players.find(p => p.name === myHunter.username);
-            document.getElementById('btn-ready').innerText = (me && me.confirmed) ? "WAITING..." : "READY / START";
-        });
-
-        socket.on('gameStart', (data) => { showScreen('screen-game'); });
+        socket.on('gameStart', (d) => { myRoomID = d.roomId; showScreen('screen-game'); });
 
         socket.on('gameStateUpdate', (s) => {
             const board = document.getElementById('game-board');
@@ -275,10 +247,10 @@
 
             document.getElementById('turn-txt').innerText = isTurn ? ">> YOUR MOVE" : `>> ${s.players[s.turn].name.toUpperCase()} ACTING`;
             
-            // Party List update
             document.getElementById('party-list').innerHTML = s.players.map(p => `
                 <div class="party-member" style="color:${p.quit ? '#444' : p.color}">
-                    <span>${p.name}</span> <span style="font-size:12px;">MP: ${p.mana} ${p.alive?'':'(KIA)'}</span>
+                    <div ${p.isAdmin ? "class='admin-glow'":""}>${p.isAdmin?'👑':''}${p.name}</div>
+                    <div style="font-size:12px;">MP: ${p.mana} ${p.alive?'':'(KIA)'}</div>
                 </div>`).join('');
 
             for(let y=0; y<15; y++) {
@@ -286,18 +258,18 @@
                     const cell = document.createElement('div');
                     cell.className = 'cell';
                     if(s.world[`${x}-${y}`]) cell.style.backgroundColor = s.world[`${x}-${y}`].color;
-                    
-                    const dist = me ? Math.abs(me.x - x) + Math.abs(me.y - y) : 100;
+                    const dist = me ? Math.abs(me.x - x) + Math.abs(me.y - y) : 0;
                     if(isTurn && dist === 1) {
                         cell.classList.add('valid-move');
                         cell.onclick = () => socket.emit('playerAction', { tx: x, ty: y });
                     }
-                    
                     s.players.forEach(p => {
                         if(p.alive && p.x === x && p.y === y) {
                             const h = document.createElement('div');
                             h.className = 'humanoid';
-                            h.innerHTML = `<div class="name-tag" style="color:${p.color}">${p.name}</div><div class="h-head" style="background:${p.color}"></div><div class="h-body" style="background:${p.color}"></div>`;
+                            h.innerHTML = `<div class="name-tag ${p.isAdmin ? 'admin-glow' : ''}" style="color:${p.color}">${p.name}</div>
+                                           <div class="h-head" style="background:${p.color}"></div>
+                                           <div class="h-body" style="background:${p.color}"></div>`;
                             cell.appendChild(h);
                         }
                     });
@@ -306,6 +278,7 @@
             }
         });
 
+        // BATTLES & NOTICES
         socket.on('battleStart', (data) => {
             document.getElementById('vs-panel').style.display = 'flex';
             document.getElementById('vs-fill').style.transition = 'none';
@@ -313,23 +286,26 @@
             void document.getElementById('vs-fill').offsetWidth;
             document.getElementById('vs-fill').style.transition = '5.8s linear';
             document.getElementById('vs-fill').style.width = '100%';
-            document.getElementById('vs-data').innerHTML = `${data.hunter} VS ${data.target}<br><small>${data.targetRank}</small>`;
+            document.getElementById('vs-data').innerHTML = `<span style="color:${data.hunterColor}">${data.hunter}</span> VS <span style="color:${data.targetColor}">${data.target}</span><br><small>${data.targetRank}</small>`;
         });
 
         socket.on('battleEnd', () => { document.getElementById('vs-panel').style.display = 'none'; });
-        
+
         socket.on('announcement', (msg) => {
             const board = document.getElementById('announcement-board');
-            board.innerHTML = `<div style="color:var(--sys-gold)">[SYSTEM]: ${msg}</div>` + board.innerHTML;
+            board.innerHTML = `<div style="color:var(--sys-gold); margin-bottom:4px;">[SYSTEM]: ${msg}</div>` + board.innerHTML;
         });
 
-        socket.on('returnToProfile', () => { showScreen('screen-menu'); });
+        socket.on('victoryEvent', (data) => {
+            const vs = document.getElementById('victory-screen');
+            vs.style.display = 'flex';
+            document.getElementById('winner-name').innerText = data.winner;
+            const isMe = myHunter && data.winner === myHunter.username;
+            document.getElementById('mp-deduction-info').innerText = isMe ? "RANK UP: +20 HuP" : "HUNTER KIA: MANA DEDUCTED";
+            document.getElementById('mp-deduction-info').style.color = isMe ? "var(--sys-green)" : "var(--sys-red)";
+        });
 
-        function resetGameUI() {
-            document.getElementById('announcement-board').innerHTML = "";
-            document.getElementById('game-board').innerHTML = "";
-            document.getElementById('party-list').innerHTML = "";
-        }
+        socket.on('returnToProfile', () => { showScreen('screen-menu'); document.getElementById('victory-screen').style.display = 'none'; });
 
         function doAdmin(action) {
             if(action === 'kick') socket.emit('adminAction', { action: 'kick', target: document.getElementById('admin-target').value });
@@ -337,16 +313,6 @@
             if(action === 'broadcast') { socket.emit('adminAction', { action: 'broadcast', message: document.getElementById('admin-broadcast').value }); document.getElementById('admin-broadcast').value = ""; }
         }
 
-        socket.on('updateWorldRankings', (l) => {
-            currentWorldRankings = l;
-            const list = document.getElementById('world-rank-list');
-            list.innerHTML = l.slice(0, showingFullRankings?100:10).map((h, i) => `
-                <div style="display:flex; justify-content:space-between; padding:5px; border-bottom:1px solid #222;">
-                    <span>#${i+1} ${h.username}</span><span>${h.hunterpoints} HuP</span>
-                </div>`).join('');
-        });
-
-        function toggleRankLimit() { showingFullRankings = !showingFullRankings; socket.emit('requestWorldRankings'); }
         function doLogout() { sessionStorage.clear(); location.reload(); }
     </script>
 </body>
