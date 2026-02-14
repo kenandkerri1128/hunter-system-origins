@@ -117,7 +117,22 @@ async function recordLoss(username, winnerInGameMana, quitPenalty = false) {
 
 async function processWin(room, winnerName) {
     const { data: u } = await supabase.from('Hunters').select('hunterpoints, wins').eq('username', winnerName).maybeSingle();
-    if (u && room.isOnline) await supabase.from('Hunters').update({ hunterpoints: u.hunterpoints + 20, wins: (u.wins || 0) + 1 }).eq('username', winnerName);
+    
+    // CALCULATE REWARD
+    let gain = 0;
+    if (room.isOnline) {
+        gain = 20; // PvP Win
+    } else if (room.mode === 'Monarch') {
+        gain = 5; // Monarch AI Win
+    }
+
+    // UPDATE DB IF REWARD APPLICABLE
+    if (u && gain > 0) {
+        await supabase.from('Hunters').update({ 
+            hunterpoints: u.hunterpoints + gain, 
+            wins: (u.wins || 0) + 1 
+        }).eq('username', winnerName);
+    }
     
     io.to(room.id).emit('victoryEvent', { winner: winnerName });
     room.active = false;
@@ -139,18 +154,20 @@ async function processWin(room, winnerName) {
 }
 
 function syncAllGates() {
-    // Only list rooms that have players
-    const list = Object.values(rooms).filter(r => r.isOnline && !r.active && r.players.length > 0).map(r => ({ id: r.id, name: r.name, count: r.players.length }));
+    // Only list rooms that are ONLINE, NOT ACTIVE (Playing), and HAVE PLAYERS
+    const list = Object.values(rooms)
+        .filter(r => r.isOnline && !r.active && r.players && r.players.length > 0)
+        .map(r => ({ id: r.id, name: r.name, count: r.players.length }));
     io.emit('updateGateList', list);
 }
 
 function broadcastGameState(room) { 
     if (!room) return;
     const sanitizedPlayers = room.players.map(p => ({
-        ...p, // Restores isAdmin and other properties for the Crown
+        ...p, // Restores isAdmin, color, etc for Ranking Board
         rankLabel: getFullRankLabel(p.mana), 
         displayRank: getDisplayRank(p.mana),
-        stepLimit: getStepLimit(p.mana) // Send step limit to client
+        stepLimit: getStepLimit(p.mana)
     }));
     io.to(room.id).emit('gameStateUpdate', { ...room, players: sanitizedPlayers });
 }
@@ -245,76 +262,97 @@ function advanceTurn(room) {
 
     if (nextP.isAI && nextP.alive) {
         setTimeout(async () => {
-            if (!rooms[room.id]) return;
-            let tx = nextP.x, ty = nextP.y;
-            // AI Movement Logic
-            const steps = getStepLimit(nextP.mana);
+            if (!rooms[room.id] || !room.active) return; // FIX: Prevent move after game end
             
-            if (room.mode === 'Monarch') {
-                let targets = [];
-                Object.keys(room.world).forEach(c => targets.push({x: parseInt(c.split('-')[0]), y: parseInt(c.split('-')[1])}));
-                room.players.forEach(pl => { if(pl.alive && pl.id !== nextP.id) targets.push({x: pl.x, y: pl.y}); });
-                targets.sort((a,b) => (Math.abs(nextP.x-a.x)+Math.abs(nextP.y-a.y)) - (Math.abs(nextP.x-b.x)+Math.abs(nextP.y-b.y)));
+            try {
+                let tx = nextP.x, ty = nextP.y;
+                const steps = getStepLimit(nextP.mana);
                 
-                if(targets[0]) {
-                   // Calculate direction towards target
-                   let dx = targets[0].x - nextP.x;
-                   let dy = targets[0].y - nextP.y;
-                   
-                   // AI takes multiple steps if allowed
-                   for(let s=0; s<steps; s++) {
-                       if(Math.abs(dx) > Math.abs(dy)) {
-                           if(dx > 0) tx++; else tx--;
-                       } else {
-                           if(dy > 0) ty++; else ty--;
-                       }
-                       // Simple check to not go out of bounds mid-step
-                       tx = Math.max(0, Math.min(14, tx));
-                       ty = Math.max(0, Math.min(14, ty));
-                       // Re-calc delta
-                       dx = targets[0].x - tx;
-                       dy = targets[0].y - ty;
-                   }
+                if (room.mode === 'Monarch') {
+                    let targets = [];
+                    Object.keys(room.world).forEach(c => targets.push({x: parseInt(c.split('-')[0]), y: parseInt(c.split('-')[1])}));
+                    room.players.forEach(pl => { if(pl.alive && pl.id !== nextP.id) targets.push({x: pl.x, y: pl.y}); });
+                    
+                    // FIX: Ensure targets exist before sorting to prevent crash
+                    if (targets.length > 0) {
+                        targets.sort((a,b) => (Math.abs(nextP.x-a.x)+Math.abs(nextP.y-a.y)) - (Math.abs(nextP.x-b.x)+Math.abs(nextP.y-b.y)));
+                        
+                        if(targets[0]) {
+                           let dx = targets[0].x - nextP.x;
+                           let dy = targets[0].y - nextP.y;
+                           
+                           for(let s=0; s<steps; s++) {
+                               if(Math.abs(dx) > Math.abs(dy)) {
+                                   if(dx > 0) tx++; else tx--;
+                               } else {
+                                   if(dy > 0) ty++; else ty--;
+                               }
+                               tx = Math.max(0, Math.min(14, tx));
+                               ty = Math.max(0, Math.min(14, ty));
+                               dx = targets[0].x - tx;
+                               dy = targets[0].y - ty;
+                           }
+                        }
+                    } else {
+                        // Fallback random move if no targets
+                        tx += (Math.random()>0.5?1:-1); 
+                        ty += (Math.random()>0.5?1:-1); 
+                    }
+                } else { 
+                     for(let s=0; s<steps; s++) {
+                        tx += (Math.random()>0.5?1:-1); 
+                        ty += (Math.random()>0.5?1:-1); 
+                     }
                 }
-            } else { 
-                // Random walk logic adjusted for steps
-                 for(let s=0; s<steps; s++) {
-                    tx += (Math.random()>0.5?1:-1); 
-                    ty += (Math.random()>0.5?1:-1); 
-                 }
+                nextP.x = Math.max(0, Math.min(14, tx)); nextP.y = Math.max(0, Math.min(14, ty));
+                await resolveConflict(room, nextP);
+                advanceTurn(room);
+            } catch (error) {
+                console.error("AI Error:", error);
+                advanceTurn(room); // Recover turn if AI crashes
             }
-            nextP.x = Math.max(0, Math.min(14, tx)); nextP.y = Math.max(0, Math.min(14, ty));
-            await resolveConflict(room, nextP);
-            advanceTurn(room);
         }, 800);
+    } else {
+        broadcastGameState(room);
     }
-    broadcastGameState(room);
 }
 
 async function handleExit(socket) {
     const room = Object.values(rooms).find(r => r.players.some(p => p.id === socket.id));
     if (room) {
-        // Remove player from array if still in waiting room
+        // --- CASE 1: LOBBY (WAITING ROOM) ---
         if (!room.active) {
-             room.players = room.players.filter(p => p.id !== socket.id);
+             socket.leave(room.id); // FIX: Remove from socket room immediately
+             room.players = room.players.filter(p => p.id !== socket.id); // FIX: Remove from array
+             
              if (room.players.length === 0) {
-                 delete rooms[room.id];
+                 delete rooms[room.id]; // FIX: Delete empty room
+             } else {
+                 io.to(room.id).emit('waitingRoomUpdate', room); // FIX: Notify remaining players
              }
-             syncAllGates();
-             io.to(room.id).emit('waitingRoomUpdate', room);
+             syncAllGates(); // FIX: Update gate list for everyone
              return; 
         }
 
+        // --- CASE 2: ACTIVE GAME ---
         const p = room.players.find(pl => pl.id === socket.id);
         if (p) {
             p.quit = true; p.alive = false;
+            socket.leave(room.id); // Ensure no "ghost" socket presence
+            
             if (room.isOnline) {
                 await recordLoss(p.name, 0, true);
                 const active = room.players.filter(pl => !pl.quit && !pl.isAI);
-                if (active.length === 1 && room.active) await processWin(room, active[0].name);
-                // Clean up empty rooms even in active games if everyone leaves
-                if (active.length === 0) delete rooms[room.id];
+                
+                if (active.length === 1 && room.active) {
+                    await processWin(room, active[0].name);
+                }
+                // FIX: Cleanup empty room if everyone quits
+                if (active.length === 0) {
+                     delete rooms[room.id];
+                }
             } else {
+                // Single Player Quit
                 socket.emit('returnToProfile');
                 delete rooms[room.id];
             }
