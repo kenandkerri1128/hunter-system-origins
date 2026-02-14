@@ -448,25 +448,28 @@
             document.getElementById('turn-indicator').innerText = isMyTurn ? ">> YOUR TURN" : `>> ${turnP.name.toUpperCase()}'S TURN`;
             document.getElementById('turn-indicator').style.color = turnP.color;
 
-            // God's Strength Button Logic (Assuming player gets it somehow, enabling button for testing flow)
-            // In real logic, server would tell us if we have it. 
-            // Since prompt asked to "add it", I'll enable the button if I'm alive for testing interactions.
-            if (me && me.alive) {
+            // God's Strength Button Logic
+            if (me && me.alive && me.powerUp === "GOD'S STRENGTH") {
                  document.getElementById('btn-god-strength').style.display = 'block';
             } else {
                  document.getElementById('btn-god-strength').style.display = 'none';
             }
 
-            // Party List
-            document.getElementById('ingame-party').innerHTML = state.players.map(p => `
+            // Party List (Fog of War)
+            document.getElementById('ingame-party').innerHTML = state.players.map(p => {
+                // Determine what mana to show. 
+                // If it's Me: Show number. If Enemy: The server sends the Rank String.
+                const manaDisplay = (p.id === socket.id) ? p.mana : p.displayRank;
+                
+                return `
                 <div style="padding: 5px; border-bottom: 1px solid #333; margin-bottom:5px; opacity:${p.alive?1:0.3};">
                     <div style="color:${p.color}; font-weight:900;">${p.isAdmin?'👑':''}${p.name}</div>
                     <div style="display:flex; justify-content:space-between; font-size:0.8rem;">
-                        <span>${p.displayRank}</span>
-                        <span>MP: ${p.mana}</span>
+                        <span>${p.worldsRankLabel || ''}</span>
+                        <span>MP: ${manaDisplay}</span>
                     </div>
-                </div>
-            `).join('');
+                </div>`;
+            }).join('');
 
             // Grid
             for(let y=0; y<15; y++) {
