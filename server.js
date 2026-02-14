@@ -21,7 +21,7 @@ let connectedUsers = {};
 let adminSocketId = null;
 
 // CONFIGURATION
-const ADMIN_NAME = "Kei"; // THE SOLE RULER
+const ADMIN_NAME = "Kei"; 
 const AI_NAMES = ["Sung Jinwoo", "Cha Hae-In", "Baek Yoonho", "Choi Jong-In"];
 const PLAYER_COLORS = ['#00d2ff', '#ff3e3e', '#bcff00', '#ff00ff']; 
 const RANK_COLORS = { 'E': '#00ff00', 'D': '#99ff00', 'C': '#ffff00', 'B': '#ff9900', 'A': '#ff00ff', 'S': '#ff0000', 'Silver': '#ffffff' };
@@ -401,6 +401,7 @@ io.on('connection', (socket) => {
     socket.on('disconnect', async () => { handleExit(socket); });
     socket.on('quitGame', async () => { handleExit(socket); });
 
+    // CRITICAL FIX: Robust disconnection handling to prevent "Ghost Players"
     async function handleExit(s) {
         const username = Object.keys(connectedUsers).find(u => connectedUsers[u] === s.id);
         if (username) delete connectedUsers[username];
@@ -408,29 +409,49 @@ io.on('connection', (socket) => {
 
         const room = Object.values(rooms).find(r => r.players.some(p => p.id === s.id));
         if (room) {
+            // Force socket to leave room channel
+            s.leave(room.id);
+            
             const p = room.players.find(pl => pl.id === s.id);
-            if (p && room.isOnline && !p.quit && room.active) {
-                p.quit = true; p.alive = false; 
-                const { data: u } = await supabase.from('Hunters').select('hunterpoints, losses').eq('username', p.name).maybeSingle();
-                if (u) await supabase.from('Hunters').update({ 
-                    hunterpoints: Math.max(0, u.hunterpoints - 20),
-                    losses: (u.losses || 0) + 1 
-                }).eq('username', p.name);
+            
+            if (room.active) {
+                // Game IN PROGRESS: Mark as quit
+                if (p && !p.quit) {
+                    p.quit = true; p.alive = false; 
+                    const { data: u } = await supabase.from('Hunters').select('hunterpoints, losses').eq('username', p.name).maybeSingle();
+                    if (u) await supabase.from('Hunters').update({ 
+                        hunterpoints: Math.max(0, u.hunterpoints - 20),
+                        losses: (u.losses || 0) + 1 
+                    }).eq('username', p.name);
+                    
+                    io.to(room.id).emit('announcement', `${p.name} ABANDONED THE QUEST. -20 HuP & LOSS RECORDED.`);
+                    broadcastWorldRankings();
+                }
                 
-                io.to(room.id).emit('announcement', `${p.name} ABANDONED THE QUEST. -20 HuP & LOSS RECORDED.`);
-                broadcastWorldRankings();
+                // Check Win Condition
+                const activeHuman = room.players.filter(pl => !pl.quit && !pl.isAI);
+                if (activeHuman.length === 1 && room.isOnline) {
+                    const winner = activeHuman[0];
+                    await processWin(room, winner.name);
+                }
+                
+                // Cleanup if empty
+                if (!room.active) room.players = room.players.filter(pl => pl.id !== s.id);
+                if (room.players.length === 0 || room.players.every(pl => pl.isAI && !room.active)) {
+                    delete rooms[room.id];
+                } else { 
+                    broadcastGameState(room); 
+                }
+            } else {
+                // WAITING ROOM: Totally remove player
+                room.players = room.players.filter(pl => pl.id !== s.id);
+                if (room.players.length === 0) {
+                    delete rooms[room.id];
+                } else {
+                    // CRITICAL: Notify remaining players that someone left
+                    io.to(room.id).emit('waitingRoomUpdate', room);
+                }
             }
-            
-            const activeHuman = room.players.filter(pl => !pl.quit && !pl.isAI);
-            if (activeHuman.length === 1 && room.active && room.isOnline) {
-                const winner = activeHuman[0];
-                await processWin(room, winner.name);
-            }
-            
-            if (!room.active) room.players = room.players.filter(pl => pl.id !== s.id);
-            if (room.players.length === 0 || room.players.every(pl => pl.isAI && !room.active)) {
-                delete rooms[room.id];
-            } else { broadcastGameState(room); }
             syncAllGates();
         }
     }
@@ -453,7 +474,6 @@ io.on('connection', (socket) => {
         if (rooms[room.id]) advanceTurn(room);
     });
 
-    // UPDATED BROADCAST: Ensure PowerUps are sent to owner/admin
     function broadcastGameState(room) { 
         const roomClients = io.sockets.adapter.rooms.get(room.id);
         if (roomClients) {
@@ -461,9 +481,7 @@ io.on('connection', (socket) => {
                 const isSpectatingAdmin = (socketId === adminSocketId);
                 const sanitizedPlayers = room.players.map(p => ({
                     ...p,
-                    // Mana visible to Owner OR Admin
                     mana: (p.id === socketId || isSpectatingAdmin) ? p.mana : null, 
-                    // PowerUp visible to Owner OR Admin (Fix for missing icon)
                     powerUp: (p.id === socketId || isSpectatingAdmin) ? p.powerUp : null,
                     rankLabel: getFullRankLabel(p.mana), 
                     displayRank: getDisplayRank(p.mana)
@@ -478,113 +496,137 @@ async function resolveConflict(room, p) {
     const coord = `${p.x}-${p.y}`;
     const opponent = room.players.find(o => o.id !== p.id && o.alive && o.x === p.x && o.y === p.y);
     
-    if (opponent) {
-        io.to(room.id).emit('battleStart', { 
-            hunter: p.name, 
-            hunterMana: p.mana,
-            hunterColor: p.color, 
-            hunterPowerUp: p.powerUp, 
-            target: opponent.name, 
-            targetId: opponent.id, 
-            targetMana: opponent.mana,
-            targetRank: `MP: ${opponent.mana}`, 
-            targetColor: opponent.color 
-        });
-        await new Promise(r => setTimeout(r, 6000));
-        let pCalcMana = p.mana, oCalcMana = opponent.mana, combatCancelled = false;
-        [p, opponent].forEach(player => {
-            if (player.activePowerUp) {
-                const type = player.activePowerUp.type;
-                if (type === 'DOUBLE DAMAGE') { if (player.id === p.id) pCalcMana *= 2; else oCalcMana *= 2; }
-                else if (type === 'GHOST WALK') { combatCancelled = true; teleportAway(player); io.to(room.id).emit('announcement', `${player.name} used GHOST WALK!`); }
-                else if (type === 'NETHER SWAP') {
-                    const others = room.players.filter(pl => pl.alive && pl.id !== p.id && pl.id !== opponent.id);
-                    if (others.length > 0) {
-                        const targetPlayer = others[Math.floor(Math.random() * others.length)];
-                        io.to(room.id).emit('announcement', `🌀 NETHER SWAP! ${targetPlayer.name} was pulled into the fight!`);
-                        if (pCalcMana >= targetPlayer.mana) { p.mana += targetPlayer.mana; targetPlayer.alive = false; }
-                        else { p.alive = false; opponent.mana += p.mana; }
-                        combatCancelled = true; 
+    // CRITICAL FIX: Wrapped in try/catch to ensure turn advances even if battle calculation fails
+    try {
+        if (opponent) {
+            io.to(room.id).emit('battleStart', { 
+                hunter: p.name, 
+                hunterMana: p.mana,
+                hunterColor: p.color, 
+                hunterPowerUp: p.powerUp, 
+                target: opponent.name, 
+                targetId: opponent.id, 
+                targetMana: opponent.mana,
+                targetRank: `MP: ${opponent.mana}`, 
+                targetColor: opponent.color 
+            });
+            await new Promise(r => setTimeout(r, 6000));
+            
+            // Re-fetch current state in case players disconnected during wait
+            const currP = room.players.find(pl => pl.id === p.id);
+            const currOp = room.players.find(pl => pl.id === opponent.id);
+            if(!currP || !currOp || !currP.alive || !currOp.alive) {
+                io.to(room.id).emit('battleEnd');
+                return;
+            }
+
+            let pCalcMana = p.mana, oCalcMana = opponent.mana, combatCancelled = false;
+            [p, opponent].forEach(player => {
+                if (player.activePowerUp) {
+                    const type = player.activePowerUp.type;
+                    if (type === 'DOUBLE DAMAGE') { if (player.id === p.id) pCalcMana *= 2; else oCalcMana *= 2; }
+                    else if (type === 'GHOST WALK') { combatCancelled = true; teleportAway(player); io.to(room.id).emit('announcement', `${player.name} used GHOST WALK!`); }
+                    else if (type === 'NETHER SWAP') {
+                        const others = room.players.filter(pl => pl.alive && pl.id !== p.id && pl.id !== opponent.id);
+                        if (others.length > 0) {
+                            const targetPlayer = others[Math.floor(Math.random() * others.length)];
+                            io.to(room.id).emit('announcement', `🌀 NETHER SWAP! ${targetPlayer.name} was pulled into the fight!`);
+                            if (pCalcMana >= targetPlayer.mana) { p.mana += targetPlayer.mana; targetPlayer.alive = false; }
+                            else { p.alive = false; opponent.mana += p.mana; }
+                            combatCancelled = true; 
+                        }
+                    }
+                    player.activePowerUp = null;
+                }
+            });
+            if (!combatCancelled) {
+                if (pCalcMana >= oCalcMana) { 
+                    p.mana += opponent.mana; 
+                    opponent.alive = false; 
+                    if (!opponent.isAI && room.isOnline) {
+                        await recordLoss(opponent.name, p.mana); 
+                        const loserSocket = io.sockets.sockets.get(opponent.id);
+                        if(loserSocket) sendProfileUpdate(loserSocket, opponent.name);
+                        broadcastWorldRankings();
+                    }
+                } else { 
+                    opponent.mana += p.mana; 
+                    p.alive = false; 
+                    if (!p.isAI && room.isOnline) {
+                        await recordLoss(p.name, opponent.mana); 
+                        const loserSocket = io.sockets.sockets.get(p.id);
+                        if(loserSocket) sendProfileUpdate(loserSocket, p.name);
+                        broadcastWorldRankings();
                     }
                 }
-                player.activePowerUp = null;
             }
-        });
-        if (!combatCancelled) {
-            if (pCalcMana >= oCalcMana) { 
-                p.mana += opponent.mana; 
-                opponent.alive = false; 
-                if (!opponent.isAI && room.isOnline) {
-                    await recordLoss(opponent.name, p.mana); 
-                    const loserSocket = io.sockets.sockets.get(opponent.id);
-                    if(loserSocket) sendProfileUpdate(loserSocket, opponent.name);
-                    broadcastWorldRankings();
-                }
-            } else { 
-                opponent.mana += p.mana; 
-                p.alive = false; 
-                if (!p.isAI && room.isOnline) {
-                    await recordLoss(p.name, opponent.mana); 
-                    const loserSocket = io.sockets.sockets.get(p.id);
-                    if(loserSocket) sendProfileUpdate(loserSocket, p.name);
-                    broadcastWorldRankings();
-                }
-            }
+            io.to(room.id).emit('battleEnd');
+            return;
         }
-        io.to(room.id).emit('battleEnd');
-        return;
-    }
 
-    if (room.world[coord]) {
-        const gate = room.world[coord];
-        io.to(room.id).emit('battleStart', { 
-            hunter: p.name, 
-            hunterMana: p.mana,
-            hunterColor: p.color, 
-            hunterPowerUp: p.powerUp, 
-            target: `RANK ${gate.rank}`, 
-            targetMana: gate.mana,
-            targetRank: `MP: ${gate.mana}`, 
-            targetColor: gate.color 
-        });
-        await new Promise(r => setTimeout(r, 6000));
-        if (p.mana >= gate.mana) {
-            p.mana += gate.mana;
-            delete room.world[coord];
-            if (gate.rank === 'Silver') {
-                if (!p.isAI && room.isOnline) {
-                    await processWin(room, p.name);
+        if (room.world[coord]) {
+            const gate = room.world[coord];
+            io.to(room.id).emit('battleStart', { 
+                hunter: p.name, 
+                hunterMana: p.mana,
+                hunterColor: p.color, 
+                hunterPowerUp: p.powerUp, 
+                target: `RANK ${gate.rank}`, 
+                targetMana: gate.mana,
+                targetRank: `MP: ${gate.mana}`, 
+                targetColor: gate.color 
+            });
+            await new Promise(r => setTimeout(r, 6000));
+            
+            // Re-check player existence/life
+            const currP = room.players.find(pl => pl.id === p.id);
+            if(!currP || !currP.alive) {
+                io.to(room.id).emit('battleEnd');
+                return;
+            }
+
+            if (p.mana >= gate.mana) {
+                p.mana += gate.mana;
+                delete room.world[coord];
+                if (gate.rank === 'Silver') {
+                    if (!p.isAI && room.isOnline) {
+                        await processWin(room, p.name);
+                    } else {
+                        io.to(room.id).emit('victoryEvent', { winner: p.name });
+                        room.active = false;
+                        setTimeout(() => { 
+                            if(rooms[room.id]) {
+                                io.to(room.id).emit('returnToProfile'); 
+                                delete rooms[room.id];
+                                syncAllGates();
+                            }
+                        }, 6000); 
+                    }
                 } else {
-                    io.to(room.id).emit('victoryEvent', { winner: p.name });
-                    room.active = false;
-                    setTimeout(() => { 
-                        if(rooms[room.id]) {
-                            io.to(room.id).emit('returnToProfile'); 
-                            delete rooms[room.id];
-                            syncAllGates();
-                        }
-                    }, 6000); 
+                    const aliveSorted = [...room.players].filter(pl => pl.alive).sort((a,b) => a.mana - b.mana);
+                    if (aliveSorted.length > 0 && Math.random() < (aliveSorted[0].id === p.id ? 0.6 : 0.15) && !p.powerUp) {
+                        p.powerUp = POWER_UPS[Math.floor(Math.random() * POWER_UPS.length)];
+                        io.to(p.id).emit('announcement', `SYSTEM: POWER-UP OBTAINED: ${p.powerUp}`);
+                    }
                 }
             } else {
-                const aliveSorted = [...room.players].filter(pl => pl.alive).sort((a,b) => a.mana - b.mana);
-                if (aliveSorted.length > 0 && Math.random() < (aliveSorted[0].id === p.id ? 0.6 : 0.15) && !p.powerUp) {
-                    p.powerUp = POWER_UPS[Math.floor(Math.random() * POWER_UPS.length)];
-                    io.to(p.id).emit('announcement', `SYSTEM: POWER-UP OBTAINED: ${p.powerUp}`);
+                const aliveCount = room.players.filter(pl => pl.alive).length;
+                if (aliveCount === 1) triggerRespawn(room, p.id);
+                else { 
+                    p.alive = false; 
+                    if (!p.isAI && room.isOnline) {
+                        await recordLoss(p.name, gate.mana);
+                        const loserSocket = io.sockets.sockets.get(p.id);
+                        if(loserSocket) sendProfileUpdate(loserSocket, p.name);
+                        broadcastWorldRankings();
+                    }
                 }
             }
-        } else {
-            const aliveCount = room.players.filter(pl => pl.alive).length;
-            if (aliveCount === 1) triggerRespawn(room, p.id);
-            else { 
-                p.alive = false; 
-                if (!p.isAI && room.isOnline) {
-                    await recordLoss(p.name, gate.mana);
-                    const loserSocket = io.sockets.sockets.get(p.id);
-                    if(loserSocket) sendProfileUpdate(loserSocket, p.name);
-                    broadcastWorldRankings();
-                }
-            }
+            io.to(room.id).emit('battleEnd');
         }
+    } catch (e) {
+        console.error("Battle Error:", e);
+        // Force turn advance on error to prevent stall
         io.to(room.id).emit('battleEnd');
     }
 }
@@ -610,12 +652,11 @@ function triggerRespawn(room, lastPlayerId) {
 
 function spawnGate(room) {
     let x, y, tries = 0;
-    // CRITICAL FIX: Loop Cap prevents infinite loop if board is full or stuck
+    // CRITICAL FIX: Cap loop to prevent 502 crash
     do { x = Math.floor(Math.random() * 15); y = Math.floor(Math.random() * 15); tries++; } 
-    while ((room.players.some(p => p.alive && p.x === x && p.y === y) || room.world[`${x}-${y}`]) && tries < 100);
+    while ((room.players.some(p => p.alive && p.x === x && p.y === y) || room.world[`${x}-${y}`]) && tries < 50);
     
-    // CRITICAL FIX: If no spot found after 100 tries, abort to prevent overwrite/crash
-    if (tries >= 100) return;
+    if(tries >= 50) return; // Abort if no space
 
     const cycle = Math.floor(room.globalTurns / room.players.length);
     let pool = room.respawnHappened ? (cycle >= 6 ? ['A', 'S'] : (cycle >= 3 ? ['B', 'A'] : ['C', 'B'])) : (cycle >= 6 ? ['C', 'B'] : (cycle >= 3 ? ['D', 'C'] : ['E', 'D']));
@@ -625,7 +666,7 @@ function spawnGate(room) {
     room.world[`${x}-${y}`] = { rank, color: RANK_COLORS[rank], mana: Math.floor(Math.random() * (range[1] - range[0] + 1)) + range[0] };
 }
 
-// CRITICAL FIX: Hardened logic to prevent Node.js crashes (502 Bad Gateway)
+// CRITICAL FIX: Hardened logic with Loop Caps and Null Checks
 function advanceTurn(room) {
     if (!rooms[room.id] || !room.active) return; 
     
@@ -645,13 +686,12 @@ function advanceTurn(room) {
     do { 
         nextIndex = (nextIndex + 1) % room.players.length; 
         attempts++; 
-    } while (!room.players[nextIndex].alive && attempts < room.players.length);
+    } while (!room.players[nextIndex].alive && attempts < room.players.length + 1);
     
     room.turn = nextIndex;
 
-    // CRITICAL FIX: Ensure player object exists before access (prevents crash on disconnect/race condition)
     const nextPlayer = room.players[room.turn];
-    if (!nextPlayer) return;
+    if (!nextPlayer) return; // Safety check
 
     if (aliveCount === 1 && !Object.values(room.world).some(g => g.rank === 'Silver')) {
         let sx, sy, validPos = false;
@@ -662,17 +702,16 @@ function advanceTurn(room) {
             if (!room.players.some(p => p.alive && p.x === sx && p.y === sy) && !room.world[`${sx}-${sy}`]) { validPos = true; break; }
         }
         
-        // CRITICAL FIX: Added safety cap (t < 200) to prevent Infinite Loop in Silver Gate spawn
+        // CRITICAL FIX: Loop Cap for Silver Gate Random Spawn
         if (!validPos) { 
-            let t = 0;
+            let silverTries = 0;
             do { 
                 sx = Math.floor(Math.random()*15); 
                 sy = Math.floor(Math.random()*15); 
-                t++;
-            } while (room.players.some(p => p.alive && p.x === sx && p.y === sy) && t < 200);
+                silverTries++;
+            } while (room.players.some(p => p.alive && p.x === sx && p.y === sy) && silverTries < 100);
             
-            // Only spawn if valid spot found (avoids overwriting player or infinite loop)
-            if (t < 200) {
+            if (silverTries < 100) {
                 const silverMana = Math.floor(Math.random() * 15501) + 1500;
                 room.world[`${sx}-${sy}`] = { rank: 'Silver', color: '#fff', mana: silverMana };
                 io.to(room.id).emit('announcement', "SYSTEM: THE SILVER GATE HAS APPEARED NEARBY.");
@@ -682,10 +721,10 @@ function advanceTurn(room) {
     
     if (nextPlayer.isAI && nextPlayer.alive) {
         setTimeout(async () => {
-            // Re-check existence inside timeout
             if (!rooms[room.id] || !room.active || room.turn !== room.players.indexOf(nextPlayer)) return;
-            
             let tx = nextPlayer.x, ty = nextPlayer.y;
+            
+            // AI Logic
             if (room.mode === 'Monarch') {
                 let targets = [];
                 Object.keys(room.world).forEach(c => { const g = room.world[c]; const [gx, gy] = c.split('-').map(Number); if (nextPlayer.mana >= g.mana) targets.push({ x: gx, y: gy }); });
