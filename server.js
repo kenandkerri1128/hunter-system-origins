@@ -97,7 +97,7 @@ async function sendProfileUpdate(socket, username) {
 async function recordLoss(username, winnerInGameMana, quitPenalty = false) {
     const { data: u } = await supabase.from('Hunters').select('hunterpoints, losses').eq('username', username).maybeSingle();
     if (u) {
-        let deduction = 20; // Default quit penalty
+        let deduction = 20; 
         if (!quitPenalty) {
             const mpStr = winnerInGameMana.toString();
             deduction = (winnerInGameMana >= 10000) ? parseInt(mpStr.substring(0, 2)) : parseInt(mpStr.substring(0, 1));
@@ -108,7 +108,7 @@ async function recordLoss(username, winnerInGameMana, quitPenalty = false) {
 
 async function processWin(room, winnerName) {
     const { data: u } = await supabase.from('Hunters').select('hunterpoints, wins').eq('username', winnerName).maybeSingle();
-    if (u) await supabase.from('Hunters').update({ hunterpoints: u.hunterpoints + 20, wins: (u.wins || 0) + 1 }).eq('username', winnerName);
+    if (u && room.isOnline) await supabase.from('Hunters').update({ hunterpoints: u.hunterpoints + 20, wins: (u.wins || 0) + 1 }).eq('username', winnerName);
     
     io.to(room.id).emit('victoryEvent', { winner: winnerName });
     room.active = false;
@@ -121,9 +121,11 @@ async function processWin(room, winnerName) {
     }
 
     setTimeout(() => { 
-        io.to(room.id).emit('returnToProfile'); 
-        if(rooms[room.id]) delete rooms[room.id];
-        syncAllGates();
+        if (rooms[room.id]) {
+            io.to(room.id).emit('returnToProfile'); 
+            delete rooms[room.id];
+            syncAllGates();
+        }
     }, 6000); 
 }
 
@@ -155,15 +157,30 @@ function spawnGate(room) {
     room.world[`${x}-${y}`] = { rank, color: RANK_COLORS[rank], mana: Math.floor(Math.random() * (range[1] - range[0] + 1)) + range[0] };
 }
 
+function triggerRespawn(room) {
+    io.to(room.id).emit('announcement', "QUEST FAILED: TRIGGERING WORLD RESET...");
+    room.world = {};
+    room.globalTurns = 0;
+    room.players.forEach(p => {
+        if (!p.quit) {
+            p.alive = true;
+            p.mana += 500;
+        }
+    });
+    for(let i=0; i<5; i++) spawnGate(room);
+    broadcastGameState(room);
+}
+
 // --- BATTLE ENGINE ---
 async function resolveConflict(room, p) {
     const coord = `${p.x}-${p.y}`;
     const opponent = room.players.find(o => o.id !== p.id && o.alive && o.x === p.x && o.y === p.y);
     
     if (opponent) {
-        io.to(room.id).emit('battleStart', { hunter: p.name, hunterMana: p.mana, hunterColor: p.color, hunterPowerUp: p.powerUp, target: opponent.name, targetMana: opponent.mana, targetRank: `MP: ${opponent.mana}`, targetColor: opponent.color });
+        io.to(room.id).emit('battleStart', { hunter: p.name, hunterColor: p.color, target: opponent.name, targetRank: `MP: ${opponent.mana}`, targetColor: opponent.color });
         await new Promise(r => setTimeout(r, 6000));
-        
+        if(!rooms[room.id]) return;
+
         if (p.mana >= opponent.mana) { p.mana += opponent.mana; opponent.alive = false; if (!opponent.isAI && room.isOnline) await recordLoss(opponent.name, p.mana); }
         else { opponent.mana += p.mana; p.alive = false; if (!p.isAI && room.isOnline) await recordLoss(p.name, opponent.mana); }
         io.to(room.id).emit('battleEnd');
@@ -172,15 +189,19 @@ async function resolveConflict(room, p) {
 
     if (room.world[coord]) {
         const gate = room.world[coord];
-        io.to(room.id).emit('battleStart', { hunter: p.name, hunterMana: p.mana, hunterColor: p.color, hunterPowerUp: p.powerUp, target: `RANK ${gate.rank}`, targetMana: gate.mana, targetRank: `MP: ${gate.mana}`, targetColor: gate.color });
+        io.to(room.id).emit('battleStart', { hunter: p.name, hunterColor: p.color, target: `RANK ${gate.rank}`, targetRank: `MP: ${gate.mana}`, targetColor: gate.color });
         await new Promise(r => setTimeout(r, 6000));
-        
+        if(!rooms[room.id]) return;
+
         if (p.mana >= gate.mana) {
             p.mana += gate.mana; delete room.world[coord];
             if (gate.rank === 'Silver') return await processWin(room, p.name);
         } else {
             p.alive = false; 
             if (!p.isAI && room.isOnline) await recordLoss(p.name, gate.mana);
+            
+            const aliveHunters = room.players.filter(pl => pl.alive);
+            if (aliveHunters.length === 0) triggerRespawn(room);
         }
         io.to(room.id).emit('battleEnd');
     }
@@ -192,20 +213,20 @@ function advanceTurn(room) {
     room.globalTurns++;
     if (room.globalTurns % (room.players.length * 3) === 0) for(let i=0; i<3; i++) spawnGate(room);
     
+    const aliveHunters = room.players.filter(p => p.alive);
+    
+    // Spawn Silver Gate if only 1 hunter left
+    if (aliveHunters.length === 1 && !Object.values(room.world).some(g => g.rank === 'Silver')) {
+        let sx = Math.floor(Math.random() * 15), sy = Math.floor(Math.random() * 15);
+        room.world[`${sx}-${sy}`] = { rank: 'Silver', color: '#ffffff', mana: Math.floor(Math.random() * 15501) + 1500 };
+        io.to(room.id).emit('announcement', "A SILVER MONARCH GATE HAS OPENED.");
+    }
+
     let attempts = 0;
     do { room.turn = (room.turn + 1) % room.players.length; attempts++; } 
     while (!room.players[room.turn].alive && attempts < 10);
     
     const nextP = room.players[room.turn];
-
-    // Single Player Win Condition (Last human alive against AI)
-    const aliveHumans = room.players.filter(pl => pl.alive && !pl.isAI);
-    if (aliveHumans.length === 0 && room.active) {
-        room.active = false;
-        io.to(room.id).emit('announcement', "SYSTEM: ALL HUNTERS KIA. QUEST FAILED.");
-        setTimeout(() => { io.to(room.id).emit('returnToProfile'); delete rooms[room.id]; syncAllGates(); }, 4000);
-        return;
-    }
 
     if (nextP.isAI && nextP.alive) {
         setTimeout(async () => {
@@ -230,28 +251,22 @@ function advanceTurn(room) {
 }
 
 async function handleExit(socket) {
-    const name = Object.keys(connectedUsers).find(k => connectedUsers[k] === socket.id);
-    if (name) delete connectedUsers[name];
-    if (socket.id === adminSocketId) adminSocketId = null;
-
     const room = Object.values(rooms).find(r => r.players.some(p => p.id === socket.id));
     if (room) {
         const p = room.players.find(pl => pl.id === socket.id);
         if (p) {
             p.quit = true; p.alive = false;
-            if (room.isOnline) await recordLoss(p.name, 0, true);
+            if (room.isOnline) {
+                await recordLoss(p.name, 0, true);
+                const active = room.players.filter(pl => !pl.quit && !pl.isAI);
+                if (active.length === 1 && room.active) await processWin(room, active[0].name);
+            } else {
+                socket.emit('returnToProfile');
+                delete rooms[room.id];
+            }
         }
-        
-        const humansLeft = room.players.filter(pl => !pl.quit && !pl.isAI);
-        if (humansLeft.length === 0) {
-            delete rooms[room.id];
-        } else if (humansLeft.length === 1 && room.active && room.isOnline) {
-            await processWin(room, humansLeft[0].name);
-        } else {
-            broadcastGameState(room);
-        }
+        broadcastGameState(room);
         syncAllGates();
-        broadcastWorldRankings();
     }
 }
 
@@ -264,7 +279,7 @@ io.on('connection', (socket) => {
             if (targetSocketId) {
                 const tSocket = io.sockets.sockets.get(targetSocketId);
                 if (tSocket) {
-                    tSocket.emit('authError', "SYSTEM: FORCED LOGOUT BY ADMIN.");
+                    tSocket.emit('authError', "FORCED LOGOUT BY ADMIN.");
                     handleExit(tSocket);
                     setTimeout(() => tSocket.disconnect(true), 500);
                 }
@@ -369,7 +384,7 @@ io.on('connection', (socket) => {
         if (!p || p.id !== socket.id) return;
         p.x = data.tx; p.y = data.ty;
         await resolveConflict(room, p);
-        advanceTurn(room);
+        if(rooms[room.id]) advanceTurn(room);
     });
 
     socket.on('quitGame', () => handleExit(socket));
