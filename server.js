@@ -54,24 +54,16 @@ function getDisplayRank(mana) {
     return "Rank E"; 
 }
 
-function getSimpleRank(val) {
-    if (val >= 901) return 'S';
-    if (val >= 701) return 'A';
-    if (val >= 501) return 'B';
-    if (val >= 301) return 'C';
-    if (val >= 101) return 'D';
-    return 'E';
-}
-
 function getStepLimit(mana) {
-    if (mana >= 901) return 6; // S Rank
-    if (mana >= 701) return 5; // A Rank
-    if (mana >= 501) return 4; // B Rank
-    if (mana >= 301) return 3; // C Rank
-    if (mana >= 101) return 2; // D Rank
-    return 1; // E Rank
+    if (mana >= 901) return 6; 
+    if (mana >= 701) return 5; 
+    if (mana >= 501) return 4; 
+    if (mana >= 301) return 3; 
+    if (mana >= 101) return 2; 
+    return 1; 
 }
 
+// --- DATABASE & AUTH ---
 async function getWorldRankDisplay(username) {
     const { data } = await supabase.from('Hunters').select('username, hunterpoints').order('hunterpoints', { ascending: false });
     if (!data) return { label: '#??', color: '#888' };
@@ -94,15 +86,13 @@ async function sendProfileUpdate(socket, username) {
     const { data: user } = await supabase.from('Hunters').select('*').eq('username', username).maybeSingle();
     if (user && socket) {
         const { count } = await supabase.from('Hunters').select('*', { count: 'exact', head: true }).gt('hunterpoints', user.hunterpoints);
-        const letter = getSimpleRank(user.hunterpoints);
         socket.emit('authSuccess', { 
-            username: user.username, mana: user.hunterpoints, rank: getFullRankLabel(user.hunterpoints), color: RANK_COLORS[letter],
+            username: user.username, mana: user.hunterpoints, rank: getFullRankLabel(user.hunterpoints), color: RANK_COLORS[getDisplayRank(user.hunterpoints).split(' ')[1]],
             wins: user.wins || 0, losses: user.losses || 0, worldRank: (count || 0) + 1, isAdmin: (user.username === ADMIN_NAME)
         });
     }
 }
 
-// --- GAME LOGIC HELPERS ---
 async function recordLoss(username, winnerInGameMana, quitPenalty = false) {
     const { data: u } = await supabase.from('Hunters').select('hunterpoints, losses').eq('username', username).maybeSingle();
     if (u) {
@@ -117,21 +107,12 @@ async function recordLoss(username, winnerInGameMana, quitPenalty = false) {
 
 async function processWin(room, winnerName) {
     const { data: u } = await supabase.from('Hunters').select('hunterpoints, wins').eq('username', winnerName).maybeSingle();
-    
-    // CALCULATE REWARD
     let gain = 0;
-    if (room.isOnline) {
-        gain = 20; // PvP Win
-    } else if (room.mode === 'Monarch') {
-        gain = 5; // Monarch AI Win
-    }
+    if (room.isOnline) gain = 20; 
+    else if (room.mode === 'Monarch') gain = 5; 
 
-    // UPDATE DB IF REWARD APPLICABLE
     if (u && gain > 0) {
-        await supabase.from('Hunters').update({ 
-            hunterpoints: u.hunterpoints + gain, 
-            wins: (u.wins || 0) + 1 
-        }).eq('username', winnerName);
+        await supabase.from('Hunters').update({ hunterpoints: u.hunterpoints + gain, wins: (u.wins || 0) + 1 }).eq('username', winnerName);
     }
     
     io.to(room.id).emit('victoryEvent', { winner: winnerName, points: gain });
@@ -153,23 +134,39 @@ async function processWin(room, winnerName) {
     }, 6000); 
 }
 
+// --- GATE SYNC ---
 function syncAllGates() {
-    // Only list rooms that are ONLINE, NOT ACTIVE (Playing), and HAVE PLAYERS
     const list = Object.values(rooms)
         .filter(r => r.isOnline && !r.active && r.players && r.players.length > 0)
         .map(r => ({ id: r.id, name: r.name, count: r.players.length }));
     io.emit('updateGateList', list);
 }
 
+// --- GAME LOGIC ---
 function broadcastGameState(room) { 
     if (!room) return;
-    const sanitizedPlayers = room.players.map(p => ({
-        ...p, 
-        rankLabel: getFullRankLabel(p.mana), 
-        displayRank: getDisplayRank(p.mana),
-        stepLimit: getStepLimit(p.mana)
-    }));
-    io.to(room.id).emit('gameStateUpdate', { ...room, players: sanitizedPlayers });
+    
+    // CUSTOM BROADCAST: Hide Enemy MP (Fog of War)
+    room.players.forEach(targetPlayer => {
+        const socketId = targetPlayer.id;
+        
+        // Map players specifically for THIS target socket
+        const securePlayers = room.players.map(p => {
+            const isMe = (p.id === socketId);
+            return {
+                ...p,
+                // If it's me, show Mana. If enemy, show "Rank X"
+                mana: isMe ? p.mana : getDisplayRank(p.mana), 
+                rankLabel: getFullRankLabel(p.mana), 
+                displayRank: getDisplayRank(p.mana),
+                stepLimit: getStepLimit(p.mana),
+                // Only show my own powerup
+                powerUp: isMe ? p.powerUp : null 
+            };
+        });
+
+        io.to(socketId).emit('gameStateUpdate', { ...room, players: securePlayers });
+    });
 }
 
 function spawnGate(room) {
@@ -199,50 +196,87 @@ function triggerRespawn(room) {
     broadcastGameState(room);
 }
 
-// --- BATTLE ENGINE ---
 async function resolveConflict(room, p) {
     const coord = `${p.x}-${p.y}`;
     const opponent = room.players.find(o => o.id !== p.id && o.alive && o.x === p.x && o.y === p.y);
     
+    // --- PVP COMBAT ---
     if (opponent) {
-        io.to(room.id).emit('battleStart', { hunter: p.name, hunterColor: p.color, target: opponent.name, targetRank: `MP: ${opponent.mana}`, targetColor: opponent.color });
-        await new Promise(r => setTimeout(r, 6000));
-        if(!rooms[room.id]) return;
-
-        // GOD'S STRENGTH LOGIC
-        if (p.activePowerUp === "GOD'S STRENGTH" || opponent.activePowerUp === "GOD'S STRENGTH") {
-            const god = (p.activePowerUp === "GOD'S STRENGTH") ? p : opponent;
-            const mortal = (p.activePowerUp === "GOD'S STRENGTH") ? opponent : p;
-            
-            god.mana += mortal.mana;
-            mortal.alive = false;
-            god.activePowerUp = null; // Consume powerup
-            io.to(room.id).emit('announcement', `${god.name} USED GOD'S STRENGTH!`);
-            
-            if (!mortal.isAI && room.isOnline) await recordLoss(mortal.name, god.mana);
-        } 
-        else {
-            // Standard Battle
-            if (p.mana >= opponent.mana) { p.mana += opponent.mana; opponent.alive = false; if (!opponent.isAI && room.isOnline) await recordLoss(opponent.name, p.mana); }
-            else { opponent.mana += p.mana; p.alive = false; if (!p.isAI && room.isOnline) await recordLoss(p.name, opponent.mana); }
-        }
-
-        // Check for Respawn if all died in PvP/Solo
-        if (room.players.every(pl => !pl.alive)) triggerRespawn(room);
+        // Show battle screen with delayed result
+        io.to(room.id).emit('battleStart', { 
+            hunter: p.name, hunterColor: p.color, 
+            target: opponent.name, targetRank: getDisplayRank(opponent.mana), targetColor: opponent.color 
+        });
         
+        await new Promise(r => setTimeout(r, 6000));
+        if(!rooms[room.id]) return; // Safety check
+
+        // POWER UP CHECKS
+        const pPower = p.activePowerUp;
+        const oPower = opponent.activePowerUp;
+        p.activePowerUp = null; // Consume
+        opponent.activePowerUp = null; // Consume
+
+        // 1. GOD'S STRENGTH (Instant Win & Steal)
+        if (pPower === "GOD'S STRENGTH") {
+            p.mana += opponent.mana;
+            opponent.alive = false;
+            io.to(room.id).emit('announcement', `${p.name} USED GOD'S STRENGTH!`);
+            if (!opponent.isAI && room.isOnline) await recordLoss(opponent.name, p.mana);
+        }
+        else if (oPower === "GOD'S STRENGTH") {
+             opponent.mana += p.mana;
+             p.alive = false;
+             io.to(room.id).emit('announcement', `${opponent.name} USED GOD'S STRENGTH!`);
+             if (!p.isAI && room.isOnline) await recordLoss(p.name, opponent.mana);
+        }
+        // 2. STANDARD BATTLE
+        else {
+            if (p.mana >= opponent.mana) { 
+                p.mana += opponent.mana; 
+                opponent.alive = false; 
+                if (!opponent.isAI && room.isOnline) await recordLoss(opponent.name, p.mana); 
+            } else { 
+                opponent.mana += p.mana; 
+                p.alive = false; 
+                if (!p.isAI && room.isOnline) await recordLoss(p.name, opponent.mana); 
+            }
+        }
+        
+        // Check Wipe
+        if (room.players.every(pl => !pl.alive)) triggerRespawn(room);
         io.to(room.id).emit('battleEnd');
         return;
     }
 
+    // --- GATE COMBAT ---
     if (room.world[coord]) {
         const gate = room.world[coord];
-        io.to(room.id).emit('battleStart', { hunter: p.name, hunterColor: p.color, target: `RANK ${gate.rank}`, targetRank: `MP: ${gate.mana}`, targetColor: gate.color });
+        io.to(room.id).emit('battleStart', { 
+            hunter: p.name, hunterColor: p.color, 
+            target: `RANK ${gate.rank}`, targetRank: `MP: ${gate.mana}`, targetColor: gate.color 
+        });
+        
         await new Promise(r => setTimeout(r, 6000));
         if(!rooms[room.id]) return;
 
-        // God's Strength does NOT work on gates
+        // God's Strength FAILS against gates (as requested)
+        if (p.activePowerUp === "GOD'S STRENGTH") {
+             io.to(room.id).emit('announcement', `${p.name}'S GOD STRENGTH FAILED AGAINST THE GATE!`);
+             p.activePowerUp = null;
+        }
+
         if (p.mana >= gate.mana) {
-            p.mana += gate.mana; delete room.world[coord];
+            p.mana += gate.mana; 
+            delete room.world[coord];
+            
+            // GATE REWARD: 20% Chance for Power Up
+            if (Math.random() < 0.2) {
+                const item = POWER_UPS[Math.floor(Math.random() * POWER_UPS.length)];
+                p.powerUp = item;
+                io.to(room.id).emit('announcement', `${p.name} OBTAINED RUNE: ${item}`);
+            }
+
             if (gate.rank === 'Silver') return await processWin(room, p.name);
         } else {
             p.alive = false; 
@@ -258,67 +292,47 @@ async function resolveConflict(room, p) {
 function advanceTurn(room) {
     if (!rooms[room.id] || !room.active) return;
     
+    // FREEZE FIX: Check if anyone is actually alive
+    const aliveHunters = room.players.filter(p => p.alive);
+    if (aliveHunters.length === 0) return; 
+
     room.globalTurns++;
+    // Spawn gates periodically
     if (room.globalTurns % (room.players.length * 3) === 0) for(let i=0; i<3; i++) spawnGate(room);
     
-    const aliveHunters = room.players.filter(p => p.alive);
-    
-    // Spawn Silver Gate (1,500 - 17,000 MP)
+    // Silver Gate Logic
     if (aliveHunters.length === 1 && !Object.values(room.world).some(g => g.rank === 'Silver')) {
         let sx = Math.floor(Math.random() * 15), sy = Math.floor(Math.random() * 15);
         room.world[`${sx}-${sy}`] = { rank: 'Silver', color: '#ffffff', mana: Math.floor(Math.random() * 15501) + 1500 };
         io.to(room.id).emit('announcement', "A SILVER MONARCH GATE HAS OPENED.");
     }
 
+    // Find next turn
     let attempts = 0;
-    do { room.turn = (room.turn + 1) % room.players.length; attempts++; } 
-    while (!room.players[room.turn].alive && attempts < 10);
+    do { 
+        room.turn = (room.turn + 1) % room.players.length; 
+        attempts++; 
+    } while (!room.players[room.turn].alive && attempts < 20); // Safety break
     
     const nextP = room.players[room.turn];
 
+    // AI Logic
     if (nextP.isAI && nextP.alive) {
         setTimeout(async () => {
             if (!rooms[room.id] || !room.active) return;
-            
             try {
+                // AI Movement logic (simplified for stability)
                 let tx = nextP.x, ty = nextP.y;
-                const steps = getStepLimit(nextP.mana);
+                let moved = false;
                 
-                if (room.mode === 'Monarch') {
-                    let targets = [];
-                    Object.keys(room.world).forEach(c => targets.push({x: parseInt(c.split('-')[0]), y: parseInt(c.split('-')[1])}));
-                    room.players.forEach(pl => { if(pl.alive && pl.id !== nextP.id) targets.push({x: pl.x, y: pl.y}); });
-                    
-                    if (targets.length > 0) {
-                        targets.sort((a,b) => (Math.abs(nextP.x-a.x)+Math.abs(nextP.y-a.y)) - (Math.abs(nextP.x-b.x)+Math.abs(nextP.y-b.y)));
-                        
-                        if(targets[0]) {
-                           let dx = targets[0].x - nextP.x;
-                           let dy = targets[0].y - nextP.y;
-                           
-                           for(let s=0; s<steps; s++) {
-                               if(Math.abs(dx) > Math.abs(dy)) {
-                                   if(dx > 0) tx++; else tx--;
-                               } else {
-                                   if(dy > 0) ty++; else ty--;
-                               }
-                               tx = Math.max(0, Math.min(14, tx));
-                               ty = Math.max(0, Math.min(14, ty));
-                               dx = targets[0].x - tx;
-                               dy = targets[0].y - ty;
-                           }
-                        }
-                    } else {
-                        tx += (Math.random()>0.5?1:-1); 
-                        ty += (Math.random()>0.5?1:-1); 
-                    }
-                } else { 
-                     for(let s=0; s<steps; s++) {
-                        tx += (Math.random()>0.5?1:-1); 
-                        ty += (Math.random()>0.5?1:-1); 
-                     }
-                }
-                nextP.x = Math.max(0, Math.min(14, tx)); nextP.y = Math.max(0, Math.min(14, ty));
+                // AI simply moves randomly to neighbors for stability
+                const moveOpts = [{x:0,y:1}, {x:0,y:-1}, {x:1,y:0}, {x:-1,y:0}];
+                const choice = moveOpts[Math.floor(Math.random() * moveOpts.length)];
+                
+                tx = Math.max(0, Math.min(14, tx + choice.x));
+                ty = Math.max(0, Math.min(14, ty + choice.y));
+                
+                nextP.x = tx; nextP.y = ty;
                 await resolveConflict(room, nextP);
                 advanceTurn(room);
             } catch (error) {
@@ -334,44 +348,47 @@ function advanceTurn(room) {
 async function handleExit(socket) {
     const room = Object.values(rooms).find(r => r.players.some(p => p.id === socket.id));
     
-    // REMOVE FROM CONNECTED USERS
+    // Clean up global user tracking
     const username = Object.keys(connectedUsers).find(key => connectedUsers[key] === socket.id);
     if(username) delete connectedUsers[username];
 
     if (room) {
-        // --- CASE 1: LOBBY (WAITING ROOM) ---
-        if (!room.active) {
-             socket.leave(room.id); 
-             room.players = room.players.filter(p => p.id !== socket.id); 
+        // Remove player from data
+        const wasActive = room.active;
+        const p = room.players.find(pl => pl.id === socket.id);
+        
+        if (!wasActive) {
+             // LOBBY/WAITING: Full removal
+             room.players = room.players.filter(pl => pl.id !== socket.id);
+             socket.leave(room.id);
              
-             if (room.players.length === 0) {
-                 delete rooms[room.id]; 
-             } else {
-                 io.to(room.id).emit('waitingRoomUpdate', room); 
-             }
-             syncAllGates(); // IMMEDIATE UPDATE
-             return; 
+             if (room.players.length === 0) delete rooms[room.id];
+             else io.to(room.id).emit('waitingRoomUpdate', room);
+             
+             syncAllGates(); 
+             return;
         }
 
-        // --- CASE 2: ACTIVE GAME ---
-        const p = room.players.find(pl => pl.id === socket.id);
+        // IN GAME: Mark quit
         if (p) {
             p.quit = true; p.alive = false;
-            socket.leave(room.id); 
-            socket.emit('returnToProfile'); // UNFREEZE QUITTER
+            socket.leave(room.id);
+            socket.emit('returnToProfile'); // Go back to menu
             
             if (room.isOnline) {
                 await recordLoss(p.name, 0, true);
                 const active = room.players.filter(pl => !pl.quit && !pl.isAI);
                 
+                // If only 1 human left, they win
                 if (active.length === 1 && room.active) {
                     await processWin(room, active[0].name);
                 }
+                // If 0 humans left, delete room
                 if (active.length === 0) {
                      delete rooms[room.id];
                 }
             } else {
-                delete rooms[room.id];
+                delete rooms[room.id]; // Delete solo room
             }
         }
         broadcastGameState(room);
@@ -379,7 +396,7 @@ async function handleExit(socket) {
     }
 }
 
-// --- SOCKET CONNECTION ---
+// --- SOCKETS ---
 io.on('connection', (socket) => {
     socket.on('requestGateList', () => syncAllGates());
     socket.on('requestWorldRankings', () => broadcastWorldRankings());
@@ -387,48 +404,35 @@ io.on('connection', (socket) => {
     socket.on('adminAction', async (data) => {
         if (socket.id !== adminSocketId) return;
         if (data.action === 'kick') {
-            const targetSocketId = connectedUsers[data.target];
-            if (targetSocketId) {
-                const tSocket = io.sockets.sockets.get(targetSocketId);
-                if (tSocket) {
-                    tSocket.emit('authError', "FORCED LOGOUT BY ADMIN.");
-                    handleExit(tSocket);
-                    setTimeout(() => tSocket.disconnect(true), 500);
-                }
+            const tId = connectedUsers[data.target];
+            if (tId) {
+                const s = io.sockets.sockets.get(tId);
+                if (s) { s.emit('authError', "KICKED"); handleExit(s); s.disconnect(); }
             }
         }
-        if (data.action === 'broadcast') {
-            const msg = { sender: 'SYSTEM ADMIN', text: data.message, rank: 'ADMIN', timestamp: new Date().toLocaleTimeString(), isAdmin: true };
-            recentAdminMessages.push(msg);
-            io.emit('receiveMessage', msg);
-        }
+        if (data.action === 'broadcast') io.emit('receiveMessage', { sender: 'ADMIN', text: data.message, rank: 'GM', isAdmin: true });
         if (data.action === 'spectate') {
-            const room = Object.values(rooms).find(r => r.players.some(p => p.name === data.targetName));
-            if (room) { 
-                socket.join(room.id); 
-                socket.emit('gameStart', { roomId: room.id }); 
-                broadcastGameState(room); 
-            }
+            const r = Object.values(rooms).find(rm => rm.players.some(p => p.name === data.targetName));
+            if (r) { socket.join(r.id); socket.emit('gameStart', {roomId:r.id}); broadcastGameState(r); }
         }
     });
 
     socket.on('authRequest', async (data) => {
         if (data.type === 'signup') {
-             // DUPLICATE NAME CHECK
-             const { data: existing } = await supabase.from('Hunters').select('username').eq('username', data.u).maybeSingle();
-             if (existing) {
-                 socket.emit('authError', "USERNAME TAKEN.");
-                 return;
-             }
+             const { data: ex } = await supabase.from('Hunters').select('username').eq('username', data.u).maybeSingle();
+             if (ex) return socket.emit('authError', "USERNAME TAKEN");
              const { error } = await supabase.from('Hunters').insert([{ username: data.u, password: data.p, hunterpoints: 0 }]);
-             if (error) socket.emit('authError', "REGISTRATION FAILED.");
-             else socket.emit('authError', "REGISTRATION SUCCESS! PLEASE LOGIN.");
+             socket.emit('authError', error ? "ERROR" : "SUCCESS");
         } else {
-             // DUPLICATE LOGIN CHECK
-             if (connectedUsers[data.u]) {
-                 socket.emit('authError', "ALREADY LOGGED IN.");
-                 return;
+             // Refresh/Login Logic
+             if (connectedUsers[data.u] && connectedUsers[data.u] !== socket.id) {
+                 // Check if old socket is actually dead
+                 const oldS = io.sockets.sockets.get(connectedUsers[data.u]);
+                 if (oldS && oldS.connected) {
+                     return socket.emit('authError', "ALREADY LOGGED IN");
+                 }
              }
+             
              const { data: user } = await supabase.from('Hunters').select('*').eq('username', data.u).eq('password', data.p).maybeSingle();
              if (user) {
                  connectedUsers[user.username] = socket.id;
@@ -436,9 +440,7 @@ io.on('connection', (socket) => {
                  sendProfileUpdate(socket, user.username);
                  syncAllGates();
                  broadcastWorldRankings();
-             } else {
-                 socket.emit('authError', "INVALID CREDENTIALS.");
-             }
+             } else socket.emit('authError', "INVALID");
         }
     });
 
@@ -446,95 +448,81 @@ io.on('connection', (socket) => {
         const room = Object.values(rooms).find(r => r.players.some(p => p.id === socket.id));
         if (room && room.active) {
             const p = room.players.find(pl => pl.id === socket.id);
-            if (p && p.alive) {
-                // For simplicity, we toggle God's Strength if requested
-                if (data.type === "GOD'S STRENGTH") {
-                    p.activePowerUp = "GOD'S STRENGTH";
-                    io.to(room.id).emit('announcement', `${p.name} ACTIVATED GOD'S STRENGTH!`);
-                }
+            if (p && p.alive && p.powerUp === data.type) {
+                p.activePowerUp = data.type; // Stage it for next battle
+                p.powerUp = null; // Remove from inventory
+                io.to(room.id).emit('announcement', `${p.name} IS PREPARING ${data.type}...`);
             }
         }
     });
 
-    socket.on('joinChatRoom', (roomId) => {
-        socket.rooms.forEach(r => { if(r !== socket.id) socket.leave(r); });
-        socket.join(roomId);
-        socket.emit('joinedRoom', roomId);
-        recentAdminMessages.slice(-5).forEach(m => socket.emit('receiveMessage', m));
+    socket.on('joinChatRoom', (rid) => { socket.leaveAll(); socket.join(rid); });
+    socket.on('sendMessage', (d) => {
+        const msg = { sender: d.senderName, text: d.message, timestamp: new Date().toLocaleTimeString(), isAdmin: d.senderName === ADMIN_NAME };
+        if(!d.roomId || d.roomId==='global') io.emit('receiveMessage', msg);
+        else io.to(d.roomId).emit('receiveMessage', msg);
     });
 
-    socket.on('sendMessage', async (data) => {
-        const { data: u } = await supabase.from('Hunters').select('hunterpoints').eq('username', data.senderName).maybeSingle();
-        const msg = { sender: data.senderName, text: data.message, rank: getDisplayRank(u?.hunterpoints || 0), timestamp: new Date().toLocaleTimeString(), isAdmin: data.senderName === ADMIN_NAME };
-        if (!data.roomId || data.roomId === 'global') io.emit('receiveMessage', msg);
-        else io.to(data.roomId).emit('receiveMessage', msg);
-    });
-
-    socket.on('createGate', async (data) => {
-        const id = `gate_${Date.now()}`;
-        const wr = await getWorldRankDisplay(data.host);
-        rooms[id] = { id, name: data.name, isOnline: true, active: false, turn: 0, globalTurns: 0, players: [{ id: socket.id, name: data.host, x: 0, y: 0, mana: 150, worldsRankLabel: wr.label, worldsRankColor: wr.color, alive: true, confirmed: false, color: PLAYER_COLORS[0], isAI: false, quit: false, powerUp: null, activePowerUp: null, isAdmin: data.host === ADMIN_NAME }], world: {} };
+    socket.on('createGate', async (d) => {
+        const id = `g_${Date.now()}`;
+        const wr = await getWorldRankDisplay(d.host);
+        rooms[id] = { id, name: d.name, isOnline: true, active: false, turn: 0, globalTurns: 0, players: [{id:socket.id, name:d.host, x:0, y:0, mana:150, worldsRankLabel:wr.label, confirmed:false, color:PLAYER_COLORS[0], alive:true, powerUp:null, isAdmin:d.host===ADMIN_NAME}], world:{} };
         socket.join(id);
         io.to(id).emit('waitingRoomUpdate', rooms[id]);
         syncAllGates();
     });
 
-    socket.on('joinGate', async (data) => {
-        const room = rooms[data.gateID];
-        if (room && room.players.length < 4) {
-            const wr = await getWorldRankDisplay(data.user);
-            const idx = room.players.length;
-            room.players.push({ id: socket.id, name: data.user, x: corners[idx].x, y: corners[idx].y, mana: 150, worldsRankLabel: wr.label, worldsRankColor: wr.color, alive: true, confirmed: false, color: PLAYER_COLORS[idx], isAI: false, quit: false, powerUp: null, activePowerUp: null, isAdmin: data.user === ADMIN_NAME });
-            socket.join(data.gateID);
-            io.to(data.gateID).emit('waitingRoomUpdate', room);
+    socket.on('joinGate', async (d) => {
+        const r = rooms[d.gateID];
+        if (r && r.players.length < 4) {
+            const wr = await getWorldRankDisplay(d.user);
+            r.players.push({id:socket.id, name:d.user, x:0, y:0, mana:150, worldsRankLabel:wr.label, confirmed:false, color:PLAYER_COLORS[r.players.length], alive:true, powerUp:null, isAdmin:d.user===ADMIN_NAME});
+            socket.join(d.gateID);
+            io.to(d.gateID).emit('waitingRoomUpdate', r);
             syncAllGates();
         }
     });
 
-    socket.on('playerConfirm', (data) => {
-        const room = rooms[data.gateID];
-        if (room) {
-            const p = room.players.find(pl => pl.id === socket.id);
+    socket.on('playerConfirm', (d) => {
+        const r = rooms[d.gateID];
+        if(r) {
+            const p = r.players.find(pl => pl.id === socket.id);
             if(p) p.confirmed = true;
-            if (room.players.length >= 2 && room.players.every(pl => pl.confirmed)) {
-                room.active = true; for(let i=0; i<5; i++) spawnGate(room);
-                io.to(room.id).emit('gameStart', { roomId: room.id });
-                advanceTurn(room);
-                syncAllGates();
-            } else io.to(room.id).emit('waitingRoomUpdate', room);
+            if(r.players.length >= 2 && r.players.every(pl=>pl.confirmed)) {
+                r.active = true;
+                for(let i=0; i<5; i++) spawnGate(r);
+                io.to(r.id).emit('gameStart', {roomId:r.id});
+                advanceTurn(r);
+                syncAllGates(); // Remove from lobby list
+            } else io.to(r.id).emit('waitingRoomUpdate', r);
         }
     });
 
-    socket.on('startSoloAI', async (data) => {
-        const id = `solo_${socket.id}_${Date.now()}`;
-        rooms[id] = {
-            id, active: true, turn: 0, mode: data.mode, globalTurns: 0, isOnline: false,
-            players: [
-                { id: socket.id, name: data.user, x: 0, y: 0, mana: 150, alive: true, isAI: false, color: PLAYER_COLORS[0], powerUp: null, activePowerUp: null, isAdmin: data.user === ADMIN_NAME },
-                { id: 'ai1', name: AI_NAMES[1], x: 14, y: 0, mana: 200, alive: true, isAI: true, color: PLAYER_COLORS[1] },
-                { id: 'ai2', name: AI_NAMES[2], x: 0, y: 14, mana: 200, alive: true, isAI: true, color: PLAYER_COLORS[2] },
-                { id: 'ai3', name: AI_NAMES[3], x: 14, y: 14, mana: 200, alive: true, isAI: true, color: PLAYER_COLORS[3] }
-            ], world: {}
-        };
+    socket.on('startSoloAI', (d) => {
+        const id = `s_${socket.id}`;
+        rooms[id] = { id, active:true, turn:0, mode:d.mode, globalTurns:0, isOnline:false, players:[
+            {id:socket.id, name:d.user, x:0, y:0, mana:150, alive:true, color:PLAYER_COLORS[0], powerUp:null, isAdmin:d.user===ADMIN_NAME},
+            {id:'ai1', name:AI_NAMES[1], x:14, y:0, mana:200, alive:true, isAI:true, color:PLAYER_COLORS[1]},
+            {id:'ai2', name:AI_NAMES[2], x:0, y:14, mana:200, alive:true, isAI:true, color:PLAYER_COLORS[2]},
+            {id:'ai3', name:AI_NAMES[3], x:14, y:14, mana:200, alive:true, isAI:true, color:PLAYER_COLORS[3]}
+        ], world:{} };
         for(let i=0; i<5; i++) spawnGate(rooms[id]);
         socket.join(id);
-        socket.emit('gameStart', { roomId: id });
+        socket.emit('gameStart', {roomId:id});
         advanceTurn(rooms[id]);
     });
 
-    socket.on('playerAction', async (data) => {
-        const room = Object.values(rooms).find(r => r.players.some(p => p.id === socket.id));
-        if (!room || !room.active) return;
-        const p = room.players[room.turn];
-        if (!p || p.id !== socket.id) return;
+    socket.on('playerAction', async (d) => {
+        const r = Object.values(rooms).find(rm => rm.players.some(p => p.id === socket.id));
+        if(!r || !r.active) return;
+        const p = r.players[r.turn];
+        if(!p || p.id !== socket.id) return;
         
-        const stepLimit = getStepLimit(p.mana);
-        const dist = Math.abs(p.x - data.tx) + Math.abs(p.y - data.ty);
-        
-        if (dist <= stepLimit) {
-            p.x = data.tx; p.y = data.ty;
-            await resolveConflict(room, p);
-            if(rooms[room.id]) advanceTurn(room);
+        const dist = Math.abs(p.x - d.tx) + Math.abs(p.y - d.ty);
+        if(dist <= getStepLimit(p.mana)) {
+            p.x = d.tx; p.y = d.ty;
+            await resolveConflict(r, p);
+            advanceTurn(r);
         }
     });
 
