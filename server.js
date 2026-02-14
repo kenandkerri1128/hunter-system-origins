@@ -130,7 +130,6 @@ async function recordLoss(username, winnerInGameMana) {
     }
 }
 
-// FIXED: Process Win now handles Monarch Mode (+5) vs Multiplayer (+20)
 async function processWin(room, winnerName) {
     const { data: u } = await supabase.from('Hunters').select('hunterpoints, wins').eq('username', winnerName).maybeSingle();
     if (u) {
@@ -454,6 +453,7 @@ io.on('connection', (socket) => {
         if (rooms[room.id]) advanceTurn(room);
     });
 
+    // UPDATED BROADCAST: Ensure PowerUps are sent to owner/admin
     function broadcastGameState(room) { 
         const roomClients = io.sockets.adapter.rooms.get(room.id);
         if (roomClients) {
@@ -461,7 +461,9 @@ io.on('connection', (socket) => {
                 const isSpectatingAdmin = (socketId === adminSocketId);
                 const sanitizedPlayers = room.players.map(p => ({
                     ...p,
+                    // Mana visible to Owner OR Admin
                     mana: (p.id === socketId || isSpectatingAdmin) ? p.mana : null, 
+                    // PowerUp visible to Owner OR Admin (Fix for missing icon)
                     powerUp: (p.id === socketId || isSpectatingAdmin) ? p.powerUp : null,
                     rankLabel: getFullRankLabel(p.mana), 
                     displayRank: getDisplayRank(p.mana)
@@ -550,7 +552,7 @@ async function resolveConflict(room, p) {
             p.mana += gate.mana;
             delete room.world[coord];
             if (gate.rank === 'Silver') {
-                if (!p.isAI) {
+                if (!p.isAI && room.isOnline) {
                     await processWin(room, p.name);
                 } else {
                     io.to(room.id).emit('victoryEvent', { winner: p.name });
@@ -608,8 +610,13 @@ function triggerRespawn(room, lastPlayerId) {
 
 function spawnGate(room) {
     let x, y, tries = 0;
+    // CRITICAL FIX: Loop Cap prevents infinite loop if board is full or stuck
     do { x = Math.floor(Math.random() * 15); y = Math.floor(Math.random() * 15); tries++; } 
     while ((room.players.some(p => p.alive && p.x === x && p.y === y) || room.world[`${x}-${y}`]) && tries < 100);
+    
+    // CRITICAL FIX: If no spot found after 100 tries, abort to prevent overwrite/crash
+    if (tries >= 100) return;
+
     const cycle = Math.floor(room.globalTurns / room.players.length);
     let pool = room.respawnHappened ? (cycle >= 6 ? ['A', 'S'] : (cycle >= 3 ? ['B', 'A'] : ['C', 'B'])) : (cycle >= 6 ? ['C', 'B'] : (cycle >= 3 ? ['D', 'C'] : ['E', 'D']));
     const rank = pool[Math.floor(Math.random() * pool.length)];
@@ -618,12 +625,12 @@ function spawnGate(room) {
     room.world[`${x}-${y}`] = { rank, color: RANK_COLORS[rank], mana: Math.floor(Math.random() * (range[1] - range[0] + 1)) + range[0] };
 }
 
-// FIXED: Advance Turn hardened with better guards and turn logic to prevent infinite looping
+// CRITICAL FIX: Hardened logic to prevent Node.js crashes (502 Bad Gateway)
 function advanceTurn(room) {
     if (!rooms[room.id] || !room.active) return; 
     
     const aliveCount = room.players.filter(p => p.alive).length;
-    if (aliveCount === 0) return; // Immediate guard against empty rooms
+    if (aliveCount === 0) return; 
 
     if (aliveCount === 1 && room.survivorTurns >= 5) { 
         triggerRespawn(room, room.players[room.turn].id); 
@@ -633,7 +640,6 @@ function advanceTurn(room) {
     room.globalTurns++;
     if (room.globalTurns % (room.players.length * 3) === 0) for(let i=0; i<5; i++) spawnGate(room);
     
-    // Find next valid turn
     let attempts = 0;
     let nextIndex = room.turn;
     do { 
@@ -643,6 +649,10 @@ function advanceTurn(room) {
     
     room.turn = nextIndex;
 
+    // CRITICAL FIX: Ensure player object exists before access (prevents crash on disconnect/race condition)
+    const nextPlayer = room.players[room.turn];
+    if (!nextPlayer) return;
+
     if (aliveCount === 1 && !Object.values(room.world).some(g => g.rank === 'Silver')) {
         let sx, sy, validPos = false;
         const survivor = room.players.find(p => p.alive);
@@ -651,17 +661,30 @@ function advanceTurn(room) {
             sy = Math.max(0, Math.min(14, survivor.y + (Math.random() > 0.5 ? 1 : -1) * (Math.floor(Math.random() * 2) + 3)));
             if (!room.players.some(p => p.alive && p.x === sx && p.y === sy) && !room.world[`${sx}-${sy}`]) { validPos = true; break; }
         }
-        if (!validPos) { do { sx = Math.floor(Math.random()*15); sy = Math.floor(Math.random()*15); } while (room.players.some(p => p.alive && p.x === sx && p.y === sy)); }
         
-        const silverMana = Math.floor(Math.random() * 15501) + 1500;
-        room.world[`${sx}-${sy}`] = { rank: 'Silver', color: '#fff', mana: silverMana };
-        io.to(room.id).emit('announcement', "SYSTEM: THE SILVER GATE HAS APPEARED NEARBY.");
+        // CRITICAL FIX: Added safety cap (t < 200) to prevent Infinite Loop in Silver Gate spawn
+        if (!validPos) { 
+            let t = 0;
+            do { 
+                sx = Math.floor(Math.random()*15); 
+                sy = Math.floor(Math.random()*15); 
+                t++;
+            } while (room.players.some(p => p.alive && p.x === sx && p.y === sy) && t < 200);
+            
+            // Only spawn if valid spot found (avoids overwriting player or infinite loop)
+            if (t < 200) {
+                const silverMana = Math.floor(Math.random() * 15501) + 1500;
+                room.world[`${sx}-${sy}`] = { rank: 'Silver', color: '#fff', mana: silverMana };
+                io.to(room.id).emit('announcement', "SYSTEM: THE SILVER GATE HAS APPEARED NEARBY.");
+            }
+        }
     }
     
-    const nextPlayer = room.players[room.turn];
     if (nextPlayer.isAI && nextPlayer.alive) {
         setTimeout(async () => {
+            // Re-check existence inside timeout
             if (!rooms[room.id] || !room.active || room.turn !== room.players.indexOf(nextPlayer)) return;
+            
             let tx = nextPlayer.x, ty = nextPlayer.y;
             if (room.mode === 'Monarch') {
                 let targets = [];
@@ -672,6 +695,7 @@ function advanceTurn(room) {
                     const b = targets[0]; if (b.x > nextPlayer.x) tx++; else if (b.x < nextPlayer.x) tx--; if (b.y > nextPlayer.y) ty++; else if (b.y < nextPlayer.y) ty--;
                 } else { tx += (Math.random() > 0.5 ? 1 : -1); ty += (Math.random() > 0.5 ? 1 : -1); }
             } else { tx += (Math.random() > 0.5 ? 1 : -1); ty += (Math.random() > 0.5 ? 1 : -1); }
+            
             tx = Math.max(0, Math.min(14, tx)); ty = Math.max(0, Math.min(14, ty));
             if (!isPathBlocked(room, nextPlayer.x, nextPlayer.y, tx, ty)) { nextPlayer.x = tx; nextPlayer.y = ty; await resolveConflict(room, nextPlayer); }
             if (rooms[room.id]) advanceTurn(room);
