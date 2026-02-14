@@ -63,6 +63,15 @@ function getSimpleRank(val) {
     return 'E';
 }
 
+function getStepLimit(mana) {
+    if (mana >= 901) return 6; // S Rank
+    if (mana >= 701) return 5; // A Rank
+    if (mana >= 501) return 4; // B Rank
+    if (mana >= 301) return 3; // C Rank
+    if (mana >= 101) return 2; // D Rank
+    return 1; // E Rank
+}
+
 async function getWorldRankDisplay(username) {
     const { data } = await supabase.from('Hunters').select('username, hunterpoints').order('hunterpoints', { ascending: false });
     if (!data) return { label: '#??', color: '#888' };
@@ -130,7 +139,8 @@ async function processWin(room, winnerName) {
 }
 
 function syncAllGates() {
-    const list = Object.values(rooms).filter(r => r.isOnline && !r.active).map(r => ({ id: r.id, name: r.name, count: r.players.length }));
+    // Only list rooms that have players
+    const list = Object.values(rooms).filter(r => r.isOnline && !r.active && r.players.length > 0).map(r => ({ id: r.id, name: r.name, count: r.players.length }));
     io.emit('updateGateList', list);
 }
 
@@ -139,7 +149,8 @@ function broadcastGameState(room) {
     const sanitizedPlayers = room.players.map(p => ({
         ...p, // Restores isAdmin and other properties for the Crown
         rankLabel: getFullRankLabel(p.mana), 
-        displayRank: getDisplayRank(p.mana)
+        displayRank: getDisplayRank(p.mana),
+        stepLimit: getStepLimit(p.mana) // Send step limit to client
     }));
     io.to(room.id).emit('gameStateUpdate', { ...room, players: sanitizedPlayers });
 }
@@ -236,16 +247,42 @@ function advanceTurn(room) {
         setTimeout(async () => {
             if (!rooms[room.id]) return;
             let tx = nextP.x, ty = nextP.y;
+            // AI Movement Logic
+            const steps = getStepLimit(nextP.mana);
+            
             if (room.mode === 'Monarch') {
                 let targets = [];
                 Object.keys(room.world).forEach(c => targets.push({x: parseInt(c.split('-')[0]), y: parseInt(c.split('-')[1])}));
                 room.players.forEach(pl => { if(pl.alive && pl.id !== nextP.id) targets.push({x: pl.x, y: pl.y}); });
                 targets.sort((a,b) => (Math.abs(nextP.x-a.x)+Math.abs(nextP.y-a.y)) - (Math.abs(nextP.x-b.x)+Math.abs(nextP.y-b.y)));
+                
                 if(targets[0]) {
-                    if (targets[0].x > nextP.x) tx++; else if (targets[0].x < nextP.x) tx--;
-                    if (targets[0].y > nextP.y) ty++; else if (targets[0].y < nextP.y) ty--;
+                   // Calculate direction towards target
+                   let dx = targets[0].x - nextP.x;
+                   let dy = targets[0].y - nextP.y;
+                   
+                   // AI takes multiple steps if allowed
+                   for(let s=0; s<steps; s++) {
+                       if(Math.abs(dx) > Math.abs(dy)) {
+                           if(dx > 0) tx++; else tx--;
+                       } else {
+                           if(dy > 0) ty++; else ty--;
+                       }
+                       // Simple check to not go out of bounds mid-step
+                       tx = Math.max(0, Math.min(14, tx));
+                       ty = Math.max(0, Math.min(14, ty));
+                       // Re-calc delta
+                       dx = targets[0].x - tx;
+                       dy = targets[0].y - ty;
+                   }
                 }
-            } else { tx += (Math.random()>0.5?1:-1); ty += (Math.random()>0.5?1:-1); }
+            } else { 
+                // Random walk logic adjusted for steps
+                 for(let s=0; s<steps; s++) {
+                    tx += (Math.random()>0.5?1:-1); 
+                    ty += (Math.random()>0.5?1:-1); 
+                 }
+            }
             nextP.x = Math.max(0, Math.min(14, tx)); nextP.y = Math.max(0, Math.min(14, ty));
             await resolveConflict(room, nextP);
             advanceTurn(room);
@@ -257,6 +294,17 @@ function advanceTurn(room) {
 async function handleExit(socket) {
     const room = Object.values(rooms).find(r => r.players.some(p => p.id === socket.id));
     if (room) {
+        // Remove player from array if still in waiting room
+        if (!room.active) {
+             room.players = room.players.filter(p => p.id !== socket.id);
+             if (room.players.length === 0) {
+                 delete rooms[room.id];
+             }
+             syncAllGates();
+             io.to(room.id).emit('waitingRoomUpdate', room);
+             return; 
+        }
+
         const p = room.players.find(pl => pl.id === socket.id);
         if (p) {
             p.quit = true; p.alive = false;
@@ -264,6 +312,8 @@ async function handleExit(socket) {
                 await recordLoss(p.name, 0, true);
                 const active = room.players.filter(pl => !pl.quit && !pl.isAI);
                 if (active.length === 1 && room.active) await processWin(room, active[0].name);
+                // Clean up empty rooms even in active games if everyone leaves
+                if (active.length === 0) delete rooms[room.id];
             } else {
                 socket.emit('returnToProfile');
                 delete rooms[room.id];
@@ -390,9 +440,17 @@ io.on('connection', (socket) => {
         if (!room || !room.active) return;
         const p = room.players[room.turn];
         if (!p || p.id !== socket.id) return;
-        p.x = data.tx; p.y = data.ty;
-        await resolveConflict(room, p);
-        if(rooms[room.id]) advanceTurn(room);
+        
+        // Calculate allowed step distance based on Rank
+        const stepLimit = getStepLimit(p.mana);
+        const dist = Math.abs(p.x - data.tx) + Math.abs(p.y - data.ty);
+        
+        // Only move if within rank limit
+        if (dist <= stepLimit) {
+            p.x = data.tx; p.y = data.ty;
+            await resolveConflict(room, p);
+            if(rooms[room.id]) advanceTurn(room);
+        }
     });
 
     socket.on('quitGame', () => handleExit(socket));
