@@ -26,6 +26,7 @@ const AI_NAMES = ["Sung Jinwoo", "Cha Hae-In", "Baek Yoonho", "Choi Jong-In"];
 const PLAYER_COLORS = ['#00d2ff', '#ff3e3e', '#bcff00', '#ff00ff']; 
 const RANK_COLORS = { 'E': '#00ff00', 'D': '#99ff00', 'C': '#ffff00', 'B': '#ff9900', 'A': '#ff00ff', 'S': '#ff0000', 'Silver': '#ffffff' };
 const POWER_UPS = ['DOUBLE DAMAGE', 'GHOST WALK', 'NETHER SWAP'];
+const CORNERS = [{x:0,y:0}, {x:14,y:0}, {x:0,y:14}, {x:14,y:14}];
 
 // --- RANKING HELPERS ---
 function getFullRankLabel(val) {
@@ -177,6 +178,15 @@ function isPathBlocked(room, x1, y1, x2, y2) {
     return false;
 }
 
+// CRITICAL FIX: Find first available slot (0, 1, 2, 3) to avoid stacking
+function getAvailableSlot(room) {
+    const taken = room.players.map(p => p.slot);
+    for(let i=0; i<4; i++) {
+        if(!taken.includes(i)) return i;
+    }
+    return -1; // Room full
+}
+
 // --- SOCKET CONNECTION ---
 io.on('connection', (socket) => {
     
@@ -292,21 +302,21 @@ io.on('connection', (socket) => {
     socket.on('requestWorldRankings', async () => broadcastWorldRankings());
     socket.on('requestGateList', () => syncAllGates());
 
-    const corners = [{x:0,y:0}, {x:14,y:0}, {x:0,y:14}, {x:14,y:14}];
-
     socket.on('createGate', async (data) => {
         const id = `gate_${Date.now()}`;
         const initialInGameMana = Math.floor(Math.random() * 251) + 50;
         const wrData = await getWorldRankDisplay(data.host);
 
+        // FIXED: Explicit Slot 0 assignment
         rooms[id] = {
             id, name: data.name, isOnline: true, active: false, turn: 0, globalTurns: 0, survivorTurns: 0,
             respawnHappened: false,
             players: [{ 
                 id: socket.id, 
                 name: data.host, 
-                x: corners[0].x, 
-                y: corners[0].y, 
+                slot: 0,
+                x: CORNERS[0].x, 
+                y: CORNERS[0].y, 
                 mana: initialInGameMana, 
                 rankLabel: getFullRankLabel(initialInGameMana),
                 worldRankLabel: wrData.label,
@@ -326,20 +336,25 @@ io.on('connection', (socket) => {
         const room = rooms[data.gateID];
         if (room && room.players.length < 4) {
             if (room.players.some(p => p.name === data.user)) return; 
-            const idx = room.players.length;
+            
+            // FIXED: Get first available slot instead of length
+            const slot = getAvailableSlot(room);
+            if(slot === -1) return; // Should not happen if length < 4
+
             const playerMana = Math.floor(Math.random() * 251) + 50;
             const wrData = await getWorldRankDisplay(data.user);
 
             room.players.push({ 
                 id: socket.id, 
-                name: data.user, 
-                x: corners[idx].x, 
-                y: corners[idx].y, 
+                name: data.user,
+                slot: slot,
+                x: CORNERS[slot].x, 
+                y: CORNERS[slot].y, 
                 mana: playerMana, 
                 rankLabel: getFullRankLabel(playerMana),
                 worldRankLabel: wrData.label,
                 worldRankColor: wrData.color,
-                alive: true, confirmed: false, color: PLAYER_COLORS[idx], isAI: false, quit: false, powerUp: null,
+                alive: true, confirmed: false, color: PLAYER_COLORS[slot], isAI: false, quit: false, powerUp: null,
                 isAdmin: (data.user === ADMIN_NAME) 
             });
             socket.join(data.gateID);
@@ -373,10 +388,10 @@ io.on('connection', (socket) => {
             id, active: true, turn: 0, isOnline: false, mode: data.diff, globalTurns: 0, survivorTurns: 0,
             respawnHappened: false,
             players: [
-                { id: socket.id, name: data.user, ...corners[0], mana: playerMana, rankLabel: getFullRankLabel(playerMana), alive: true, isAI: false, color: PLAYER_COLORS[0], quit: false, powerUp: null, isAdmin: (data.user === ADMIN_NAME) },
-                { id: 'ai1', name: AI_NAMES[1], ...corners[1], mana: 200, rankLabel: "Lower D-Rank", alive: true, isAI: true, color: PLAYER_COLORS[1], quit: false, powerUp: null },
-                { id: 'ai2', name: AI_NAMES[2], ...corners[2], mana: 233, rankLabel: "Higher D-Rank", alive: true, isAI: true, color: PLAYER_COLORS[2], quit: false, powerUp: null },
-                { id: 'ai3', name: AI_NAMES[3], ...corners[3], mana: 200, rankLabel: "Lower D-Rank", alive: true, isAI: true, color: PLAYER_COLORS[3], quit: false, powerUp: null }
+                { id: socket.id, name: data.user, slot: 0, ...CORNERS[0], mana: playerMana, rankLabel: getFullRankLabel(playerMana), alive: true, isAI: false, color: PLAYER_COLORS[0], quit: false, powerUp: null, isAdmin: (data.user === ADMIN_NAME) },
+                { id: 'ai1', name: AI_NAMES[1], slot: 1, ...CORNERS[1], mana: 200, rankLabel: "Lower D-Rank", alive: true, isAI: true, color: PLAYER_COLORS[1], quit: false, powerUp: null },
+                { id: 'ai2', name: AI_NAMES[2], slot: 2, ...CORNERS[2], mana: 233, rankLabel: "Higher D-Rank", alive: true, isAI: true, color: PLAYER_COLORS[2], quit: false, powerUp: null },
+                { id: 'ai3', name: AI_NAMES[3], slot: 3, ...CORNERS[3], mana: 200, rankLabel: "Lower D-Rank", alive: true, isAI: true, color: PLAYER_COLORS[3], quit: false, powerUp: null }
             ],
             world: {}
         };
@@ -401,7 +416,7 @@ io.on('connection', (socket) => {
     socket.on('disconnect', async () => { handleExit(socket); });
     socket.on('quitGame', async () => { handleExit(socket); });
 
-    // CRITICAL FIX: Robust disconnection handling to prevent "Ghost Players"
+    // CRITICAL FIX: Robust disconnection handling
     async function handleExit(s) {
         const username = Object.keys(connectedUsers).find(u => connectedUsers[u] === s.id);
         if (username) delete connectedUsers[username];
@@ -409,13 +424,12 @@ io.on('connection', (socket) => {
 
         const room = Object.values(rooms).find(r => r.players.some(p => p.id === s.id));
         if (room) {
-            // Force socket to leave room channel
             s.leave(room.id);
-            
-            const p = room.players.find(pl => pl.id === s.id);
+            const pIndex = room.players.findIndex(pl => pl.id === s.id);
+            const p = room.players[pIndex];
             
             if (room.active) {
-                // Game IN PROGRESS: Mark as quit
+                // Game IN PROGRESS
                 if (p && !p.quit) {
                     p.quit = true; p.alive = false; 
                     const { data: u } = await supabase.from('Hunters').select('hunterpoints, losses').eq('username', p.name).maybeSingle();
@@ -426,16 +440,19 @@ io.on('connection', (socket) => {
                     
                     io.to(room.id).emit('announcement', `${p.name} ABANDONED THE QUEST. -20 HuP & LOSS RECORDED.`);
                     broadcastWorldRankings();
+
+                    // CRITICAL FIX: If it was the quitter's turn, advance immediately!
+                    if(room.turn === pIndex) {
+                        advanceTurn(room);
+                    }
                 }
                 
-                // Check Win Condition
                 const activeHuman = room.players.filter(pl => !pl.quit && !pl.isAI);
                 if (activeHuman.length === 1 && room.isOnline) {
                     const winner = activeHuman[0];
                     await processWin(room, winner.name);
                 }
                 
-                // Cleanup if empty
                 if (!room.active) room.players = room.players.filter(pl => pl.id !== s.id);
                 if (room.players.length === 0 || room.players.every(pl => pl.isAI && !room.active)) {
                     delete rooms[room.id];
@@ -448,7 +465,6 @@ io.on('connection', (socket) => {
                 if (room.players.length === 0) {
                     delete rooms[room.id];
                 } else {
-                    // CRITICAL: Notify remaining players that someone left
                     io.to(room.id).emit('waitingRoomUpdate', room);
                 }
             }
@@ -496,7 +512,6 @@ async function resolveConflict(room, p) {
     const coord = `${p.x}-${p.y}`;
     const opponent = room.players.find(o => o.id !== p.id && o.alive && o.x === p.x && o.y === p.y);
     
-    // CRITICAL FIX: Wrapped in try/catch to ensure turn advances even if battle calculation fails
     try {
         if (opponent) {
             io.to(room.id).emit('battleStart', { 
@@ -512,7 +527,6 @@ async function resolveConflict(room, p) {
             });
             await new Promise(r => setTimeout(r, 6000));
             
-            // Re-fetch current state in case players disconnected during wait
             const currP = room.players.find(pl => pl.id === p.id);
             const currOp = room.players.find(pl => pl.id === opponent.id);
             if(!currP || !currOp || !currP.alive || !currOp.alive) {
@@ -578,7 +592,6 @@ async function resolveConflict(room, p) {
             });
             await new Promise(r => setTimeout(r, 6000));
             
-            // Re-check player existence/life
             const currP = room.players.find(pl => pl.id === p.id);
             if(!currP || !currP.alive) {
                 io.to(room.id).emit('battleEnd');
@@ -626,7 +639,6 @@ async function resolveConflict(room, p) {
         }
     } catch (e) {
         console.error("Battle Error:", e);
-        // Force turn advance on error to prevent stall
         io.to(room.id).emit('battleEnd');
     }
 }
@@ -652,11 +664,10 @@ function triggerRespawn(room, lastPlayerId) {
 
 function spawnGate(room) {
     let x, y, tries = 0;
-    // CRITICAL FIX: Cap loop to prevent 502 crash
     do { x = Math.floor(Math.random() * 15); y = Math.floor(Math.random() * 15); tries++; } 
     while ((room.players.some(p => p.alive && p.x === x && p.y === y) || room.world[`${x}-${y}`]) && tries < 50);
     
-    if(tries >= 50) return; // Abort if no space
+    if(tries >= 50) return;
 
     const cycle = Math.floor(room.globalTurns / room.players.length);
     let pool = room.respawnHappened ? (cycle >= 6 ? ['A', 'S'] : (cycle >= 3 ? ['B', 'A'] : ['C', 'B'])) : (cycle >= 6 ? ['C', 'B'] : (cycle >= 3 ? ['D', 'C'] : ['E', 'D']));
@@ -666,7 +677,6 @@ function spawnGate(room) {
     room.world[`${x}-${y}`] = { rank, color: RANK_COLORS[rank], mana: Math.floor(Math.random() * (range[1] - range[0] + 1)) + range[0] };
 }
 
-// CRITICAL FIX: Hardened logic with Loop Caps and Null Checks
 function advanceTurn(room) {
     if (!rooms[room.id] || !room.active) return; 
     
@@ -691,7 +701,7 @@ function advanceTurn(room) {
     room.turn = nextIndex;
 
     const nextPlayer = room.players[room.turn];
-    if (!nextPlayer) return; // Safety check
+    if (!nextPlayer) return; 
 
     if (aliveCount === 1 && !Object.values(room.world).some(g => g.rank === 'Silver')) {
         let sx, sy, validPos = false;
@@ -702,7 +712,6 @@ function advanceTurn(room) {
             if (!room.players.some(p => p.alive && p.x === sx && p.y === sy) && !room.world[`${sx}-${sy}`]) { validPos = true; break; }
         }
         
-        // CRITICAL FIX: Loop Cap for Silver Gate Random Spawn
         if (!validPos) { 
             let silverTries = 0;
             do { 
@@ -724,7 +733,6 @@ function advanceTurn(room) {
             if (!rooms[room.id] || !room.active || room.turn !== room.players.indexOf(nextPlayer)) return;
             let tx = nextPlayer.x, ty = nextPlayer.y;
             
-            // AI Logic
             if (room.mode === 'Monarch') {
                 let targets = [];
                 Object.keys(room.world).forEach(c => { const g = room.world[c]; const [gx, gy] = c.split('-').map(Number); if (nextPlayer.mana >= g.mana) targets.push({ x: gx, y: gy }); });
