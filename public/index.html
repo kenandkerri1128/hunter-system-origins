@@ -114,7 +114,7 @@
 
         <div id="menu-chat-anchor" style="height: 210px; width: 400px; margin-top: 10px;"></div>
 
-        <button class="sys-btn" onclick="showScreen('screen-difficulty')">SINGLE PLAYER</button>
+        <button class="sys-btn" onclick="startAI('Monarch')" style="color:var(--sys-red); border-color:var(--sys-red);">MONARCH MODE (+5 HuP)</button>
         <button class="sys-btn" onclick="openOnlineLobby()">MULTIPLAYER</button>
         <button class="sys-btn" style="border-color:#555;" onclick="doLogout()">LOGOUT</button>
     </div>
@@ -248,7 +248,6 @@
         socket.on('receiveMessage', (data) => {
             const chatBox = document.getElementById('chat-messages');
             const msg = document.createElement('div');
-            // Admin message styling
             if(data.isAdmin) msg.className = "admin-chat-msg";
             const nameStyle = data.isAdmin ? "class='admin-glow'" : "style='color:var(--sys-blue)'";
             const crown = data.isAdmin ? "👑 " : "";
@@ -354,7 +353,6 @@
             document.getElementById('st-stats').innerText = `WINS: ${d.wins || 0} | LOSSES: ${d.losses || 0}`;
             document.getElementById('st-world-rank').innerText = `WORLD RANK: #${d.worldRank || '--'}`;
             
-            // Admin Panel Check
             document.getElementById('admin-panel').style.display = d.isAdmin ? 'flex' : 'none';
 
             const lastScreen = sessionStorage.getItem('last_screen');
@@ -367,16 +365,14 @@
             if(d.music) playMusic(d.music);
         });
 
-        // Admin Actions
         function doAdmin(action) {
             const target = document.getElementById('admin-target').value;
             const msg = document.getElementById('admin-broadcast').value;
-            const room = document.getElementById('admin-room').value; // Need an input for Room ID spectate
             
             if(action === 'kick') socket.emit('adminAction', { action: 'kick', target });
             if(action === 'broadcast') socket.emit('adminAction', { action: 'broadcast', message: msg });
             if(action === 'spectate') {
-                const roomID = document.getElementById('admin-target').value; // Reuse player input for Room ID if needed
+                const roomID = document.getElementById('admin-target').value; 
                 socket.emit('adminAction', { action: 'spectate', roomId: roomID });
             }
         }
@@ -479,13 +475,15 @@
 
         socket.on('battleEnd', () => { document.getElementById('vs-panel').style.display = 'none'; });
 
+        // FIXED: Board guarding in state update to prevent post-victory loops
         socket.on('gameStateUpdate', (s) => {
+            if (!s.active) return; // Guard: Ignore updates if game is inactive
+            
             const board = document.getElementById('game-board');
             board.innerHTML = "";
             const me = s.players.find(p => p.id === socket.id);
-            if(!me && !myHunter.isAdmin) return; // Allow admin to see board even if not a player
+            if(!me && !myHunter.isAdmin) return; 
             
-            // Fallback for Admin spectating
             const observer = me || { x: -10, y: -10 }; 
 
             const isTurn = me ? (s.players[s.turn].id === socket.id) : false;
@@ -503,7 +501,6 @@
                 const wRankIdx = currentWorldRankings.findIndex(h => h.username === p.name);
                 const wRankDisplay = wRankIdx !== -1 ? `#${wRankIdx + 1}` : '#??';
                 
-                // FIXED POWERUP ICON LOGIC
                 const pUpIcon = p.powerUp ? ` <span style="color:var(--sys-gold); animation: pulse 0.5s infinite alternate;">${POWER_ICONS[p.powerUp]}</span>` : '';
                 const mpValue = (p.id === socket.id || myHunter.isAdmin) ? `MP: ${p.mana}` : rLabel;
 
@@ -567,7 +564,7 @@
             vs.style.display = 'flex';
             document.getElementById('winner-name').innerText = data.winner;
             document.getElementById('mp-deduction-info').innerText = (data.winner === myHunter.username) 
-                ? "VICTORY ACHIEVED: +20 HuP" 
+                ? "VICTORY ACHIEVED" 
                 : "DEFEAT: HuP DEDUCTED";
         });
     </script>
