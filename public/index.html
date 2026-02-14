@@ -12,35 +12,46 @@
         .screen { display: none; flex-direction: column; align-items: center; justify-content: center; height: 100vh; width: 100vw; position: absolute; }
         .active { display: flex !important; }
         
+        /* Buttons & Inputs */
         .sys-btn { background: #000; border: 2px solid var(--sys-blue); color: var(--sys-blue); padding: 10px 40px; font-family: 'Orbitron'; cursor: pointer; margin: 10px; font-weight: 900; clip-path: polygon(15% 0, 100% 0, 85% 100%, 0 100%); width: 250px; text-transform: uppercase; transition: 0.2s; }
         .sys-btn:hover { background: var(--sys-blue); color: #000; }
         .sys-input { padding: 15px; background: #000; border: 1px solid var(--sys-blue); color: #fff; width: 300px; margin: 10px; font-family: 'Orbitron'; outline: none; }
         
+        /* Admin Glow */
         .admin-glow { color: var(--sys-gold) !important; text-shadow: 0 0 15px var(--sys-gold), 0 0 5px #fff; font-weight: 900; animation: admin-pulse 2s infinite ease-in-out; }
         @keyframes admin-pulse { 0%, 100% { filter: brightness(1); } 50% { filter: brightness(1.5) drop-shadow(0 0 10px var(--sys-gold)); } }
         .admin-chat-msg { background: rgba(255, 204, 0, 0.1); border-left: 3px solid var(--sys-gold); padding-left: 5px; margin: 2px 0; }
 
+        /* Board - Fixed 15x15 Map */
         #game-board { display: grid; grid-template-columns: repeat(15, 42px); gap: 2px; background: #111; border: 4px solid var(--sys-blue); }
         .cell { width: 42px; height: 42px; background: #000; position: relative; border: 0.5px solid #1a1a1a; box-sizing: border-box; }
         .valid-move { box-shadow: inset 0 0 0 3px var(--sys-blue); cursor: pointer; z-index: 5; }
         
+        /* Characters */
         .humanoid { position: absolute; bottom: 5px; left: 50%; transform: translateX(-50%); width: 24px; height: 30px; z-index: 10; pointer-events: none; }
         .h-head { width: 10px; height: 10px; border-radius: 50%; border: 1px solid white; margin: 0 auto; }
         .h-body { width: 20px; height: 15px; border: 1px solid white; border-radius: 4px 4px 0 0; }
         .name-tag { position: absolute; top: -22px; left: 50%; transform: translateX(-50%); font-size: 10px; white-space: nowrap; font-weight: 900; background: #000; border: 1px solid #444; padding: 1px 4px; display: flex; flex-direction: column; align-items: center; z-index: 20; }
         
-        .hud-left { width: 280px; background: rgba(0,0,0,0.9); border-right: 2px solid var(--sys-blue); padding: 15px; display: flex; flex-direction: column; height: 650px; overflow-y: auto; }
+        /* Sidebars & HUD */
+        .hud-left { width: 280px; background: rgba(0,0,0,0.9); border-right: 2px solid var(--sys-blue); padding: 15px; display: flex; flex-direction: column; height: 650px; overflow-y: auto; margin-right: 20px;}
+        /* New Right HUD for VS and Announcements */
+        .hud-right { width: 280px; background: rgba(0,0,0,0.9); border-left: 2px solid var(--sys-blue); padding: 15px; display: flex; flex-direction: column; height: 650px; overflow-y: auto; margin-left: 20px;}
+        
         .party-member { font-size: 16px; font-weight: 900; margin-bottom: 8px; border-bottom: 1px solid #222; padding: 5px 0; }
         
+        /* Combat Panel */
         #vs-panel { display: none; background: rgba(20,0,0,0.9); border: 2px solid var(--sys-red); padding: 10px; margin-bottom: 15px; flex-direction: column; align-items: center; box-shadow: 0 0 15px var(--sys-red); width: 100%; box-sizing: border-box; }
         .v-fill { height: 6px; background: var(--sys-red); width: 0%; transition: 5.8s linear; margin-top: 10px; }
         
+        /* Global Chat */
         #global-chat-container { width: 400px; height: 200px; border: 2px solid var(--sys-blue); background: rgba(0,0,0,0.8); display: none; flex-direction: column; margin-top: 10px; z-index: 2000; }
         #chat-messages { flex-grow: 1; overflow-y: auto; padding: 5px; font-size: 12px; font-family: 'Orbitron'; }
         .chat-input-row { display: flex; border-top: 1px solid var(--sys-blue); }
         .chat-input-row input { flex-grow: 1; background: #000; border: none; color: white; padding: 10px; outline: none; }
         .chat-input-row button { background: var(--sys-blue); border: none; padding: 5px 15px; cursor: pointer; font-weight: 900; }
         
+        /* Victory Screen */
         #victory-screen { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.95); z-index: 10000; flex-direction: column; align-items: center; justify-content: center; text-align: center;}
         
         /* Gate List Styling */
@@ -132,21 +143,26 @@
         <button class="sys-btn" onclick="showScreen('screen-menu')">BACK</button>
     </div>
 
-    <div id="screen-game" class="screen" style="flex-direction: row;">
+    <div id="screen-game" class="screen" style="flex-direction: row; align-items: flex-start; justify-content: center;">
+        
         <div class="hud-left">
             <h3 id="turn-txt" style="color:var(--sys-gold);">>> SYSTEM TURN</h3>
             <div id="party-list"></div>
             <div id="game-chat-anchor" style="height: 300px; width: 100%; margin-top:20px;"></div>
         </div>
-        <div style="display:flex; flex-direction: column; align-items: center; padding: 20px;">
+        
+        <div style="display:flex; flex-direction: column; align-items: center; padding: 0 20px;">
             <div id="game-board"></div>
+        </div>
+
+        <div class="hud-right">
             <div id="vs-panel">
                 <span id="vs-title" style="color:red; font-weight:900;">COMBAT INITIATED</span>
                 <div id="vs-data" style="font-size: 18px; text-align: center; margin: 10px 0;"></div>
                 <div style="width:100%; height:4px; background:#111;"><div class="v-fill" id="vs-fill"></div></div>
             </div>
-            <div id="announcement-board" style="width:100%; background:#050505; min-height:80px; font-size:12px; margin-top:10px; padding:10px; border:1px solid #222; overflow-y:auto;"></div>
-            <button class="sys-btn" style="width:100%;" onclick="quitAction()">QUIT QUEST</button>
+            <div id="announcement-board" style="width:100%; background:#050505; flex-grow: 1; font-size:12px; margin-bottom:10px; padding:10px; border:1px solid #222; overflow-y:auto;"></div>
+            <button class="sys-btn" style="width:100%; margin:0;" onclick="quitAction()">QUIT QUEST</button>
         </div>
     </div>
 
@@ -288,8 +304,11 @@
                     const cell = document.createElement('div');
                     cell.className = 'cell';
                     if(s.world[`${x}-${y}`]) cell.style.backgroundColor = s.world[`${x}-${y}`].color;
+                    
                     const dist = me ? Math.abs(me.x - x) + Math.abs(me.y - y) : 0;
-                    if(isTurn && dist === 1) {
+                    // UPDATED MOVEMENT: Use stepLimit from server
+                    const limit = me ? (me.stepLimit || 1) : 0;
+                    if(isTurn && dist <= limit && dist > 0) {
                         cell.classList.add('valid-move');
                         cell.onclick = () => socket.emit('playerAction', { tx: x, ty: y });
                     }
