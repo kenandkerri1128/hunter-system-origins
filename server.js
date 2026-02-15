@@ -112,19 +112,9 @@ async function sendProfileUpdate(socket, username) {
 }
 
 // --- GAME LOGIC HELPERS ---
-function calculateDeduction(winnerInGameMana) {
-    const mpStr = winnerInGameMana.toString();
-    let deduction = 0;
-    if (winnerInGameMana >= 10000) deduction = parseInt(mpStr.substring(0, 2));
-    else deduction = parseInt(mpStr.substring(0, 1));
-    return Math.max(1, deduction);
-}
-
 async function recordLoss(username, winnerInGameMana) {
     const { data: u } = await supabase.from('Hunters').select('hunterpoints, losses').eq('username', username).maybeSingle();
     if (u) {
-        // If winnerInGameMana is boolean TRUE, it means Explicit Quit (-20)
-        // If it's a number, it means Death/Loss (-5 is standard for loss now based on request)
         const lossAmount = (winnerInGameMana === true) ? 20 : 5;
         await supabase.from('Hunters').update({ 
             hunterpoints: Math.max(0, u.hunterpoints - lossAmount), 
@@ -202,9 +192,6 @@ io.on('connection', (socket) => {
                     targetSocket.emit('authError', "SYSTEM: FORCED LOGOUT BY ADMINISTRATOR.");
                     targetSocket.disconnect(true);
                     delete connectedUsers[data.target];
-                    socket.emit('sysLog', `KICKED USER: ${data.target}`);
-                } else {
-                    socket.emit('sysLog', `USER ${data.target} NOT FOUND.`);
                 }
             }
         }
@@ -217,7 +204,6 @@ io.on('connection', (socket) => {
                 timestamp: new Date().toLocaleTimeString(),
                 isAdmin: true
             });
-             socket.emit('sysLog', `BROADCAST SENT.`);
         }
 
         if (data.action === 'spectate') {
@@ -226,9 +212,6 @@ io.on('connection', (socket) => {
                 socket.join(data.roomId);
                 socket.emit('gameStart', { roomId: data.roomId });
                 broadcastGameState(room);
-                socket.emit('sysLog', `SPECTATING ROOM: ${data.roomId}`);
-            } else {
-                socket.emit('sysLog', `ROOM ${data.roomId} NOT FOUND.`);
             }
         }
     });
@@ -252,22 +235,18 @@ io.on('connection', (socket) => {
         
         if (user) {
             connectedUsers[user.username] = socket.id; 
-            
             const isAdmin = (user.username === ADMIN_NAME);
             if (isAdmin) adminSocketId = socket.id;
 
             // --- CRITICAL RECONNECTION FIX ---
-            // Check if this user is already inside a running room
             let reconnected = false;
             for (const roomId in rooms) {
                 const room = rooms[roomId];
                 const player = room.players.find(p => p.name === user.username);
                 if (player) {
-                    // Update the "Ghost" player with the New Socket ID
                     player.id = socket.id; 
-                    socket.join(room.id); // Re-join chat/updates channel
+                    socket.join(room.id); 
                     
-                    // Instant state update
                     if(room.active) {
                         socket.emit('gameStart', { roomId: room.id });
                         broadcastGameState(room);
@@ -278,7 +257,6 @@ io.on('connection', (socket) => {
                     break;
                 }
             }
-            // ----------------------------------
 
             const { count } = await supabase.from('Hunters').select('*', { count: 'exact', head: true }).gt('hunterpoints', user.hunterpoints);
             const exactRank = (count || 0) + 1;
@@ -292,7 +270,7 @@ io.on('connection', (socket) => {
                 wins: user.wins || 0,
                 losses: user.losses || 0,
                 worldRank: exactRank,
-                music: reconnected ? null : 'menu.mp3', // Don't reset music if reconnecting
+                music: reconnected ? null : 'menu.mp3',
                 isAdmin: isAdmin 
             });
             
@@ -341,7 +319,7 @@ io.on('connection', (socket) => {
             players: [{ 
                 id: socket.id, 
                 name: data.host, 
-                slot: 0,
+                slot: 0, 
                 x: CORNERS[0].x, 
                 y: CORNERS[0].y, 
                 mana: initialInGameMana, 
@@ -442,7 +420,6 @@ io.on('connection', (socket) => {
     socket.on('disconnect', async () => { handleExit(socket, false); });
     socket.on('quitGame', async () => { handleExit(socket, true); });
 
-    // CRITICAL FIX: Distinguish between Disconnect (Refresh) and Quit
     async function handleExit(s, isExplicitQuit) {
         const username = Object.keys(connectedUsers).find(u => connectedUsers[u] === s.id);
         if (username) delete connectedUsers[username];
@@ -450,58 +427,36 @@ io.on('connection', (socket) => {
 
         const room = Object.values(rooms).find(r => r.players.some(p => p.id === s.id));
         if (room) {
-            // Remove socket from io room to prevent ghost messages
             s.leave(room.id);
             const pIndex = room.players.findIndex(pl => pl.id === s.id);
             const p = room.players[pIndex];
             
             if (room.active) {
-                // ACTIVE GAME LOGIC
-                // Only kill player if it is an EXPLICIT QUIT. 
-                // If it's a disconnect (refresh), keep them alive for reconnection.
-                
                 if (isExplicitQuit && p && !p.quit) {
                     p.quit = true; p.alive = false; 
-                    // Explicit Quit = -20 HuP
-                    if(room.isOnline) await recordLoss(p.name, true); 
+                    if(room.isOnline) await recordLoss(p.name, true);
                     
                     io.to(room.id).emit('announcement', `${p.name} ABANDONED THE QUEST. -20 HuP & LOSS RECORDED.`);
                     broadcastWorldRankings();
 
                     if(room.turn === pIndex) {
                         advanceTurn(room);
+                    } else {
+                        broadcastGameState(room);
                     }
-                } else if (!isExplicitQuit) {
-                     // Just a disconnect - do nothing to game state, wait for reconnect
-                     // Optionally notify: io.to(room.id).emit('announcement', `${p.name} LOST CONNECTION.`);
                 }
                 
-                // Check Win Condition (Only count active non-quitters)
                 const activeHuman = room.players.filter(pl => !pl.quit && !pl.isAI);
                 
-                // If everyone quit or disconnected but 1 remains
                 if (activeHuman.length === 1 && room.isOnline) {
-                    const winner = activeHuman[0];
-                    // Ensure the winner is actually connected before awarding? 
-                    // For now, standard win processing.
-                    await processWin(room, winner.name);
-                }
-                
-                // Clean up room if NO humans are left (all quit or all disco)
-                // We check connectedUsers to see if *anyone* in the room is still connected
-                const anyConnected = room.players.some(pl => connectedUsers[pl.name]);
-                
-                if (!anyConnected && activeHuman.length === 0) {
-                     // Wait a bit before deleting in case of mass refresh
+                    await processWin(room, activeHuman[0].name);
+                } else if (activeHuman.length === 0) {
                      setTimeout(() => {
                          const stillEmpty = !room.players.some(pl => connectedUsers[pl.name]);
                          if(stillEmpty) delete rooms[room.id];
                      }, 5000);
-                } else { 
-                    broadcastGameState(room); 
                 }
             } else {
-                // WAITING ROOM: Totally remove player regardless of quit/disconnect
                 room.players = room.players.filter(pl => pl.id !== s.id);
                 if (room.players.length === 0) {
                     delete rooms[room.id];
@@ -519,13 +474,18 @@ io.on('connection', (socket) => {
         if (socket.id === adminSocketId && !room.players.some(p => p.id === adminSocketId)) return;
 
         const p = room.players[room.turn];
-        if (!p || p.id !== socket.id) return;
+        if (!p || p.id !== socket.id) {
+             socket.emit('announcement', "SYSTEM: NOT YOUR TURN OR ID MISMATCH.");
+             return;
+        }
         if (isPathBlocked(room, p.x, p.y, data.tx, data.ty)) {
             socket.emit('announcement', "SYSTEM: MOVEMENT BLOCKED BY A GATE.");
             return;
         }
+        
         const alivePlayers = room.players.filter(pl => pl.alive);
         if (alivePlayers.length === 1) room.survivorTurns++;
+        
         p.x = data.tx; p.y = data.ty;
         await resolveConflict(room, p);
         if (rooms[room.id]) advanceTurn(room);
@@ -576,6 +536,7 @@ async function resolveConflict(room, p) {
             }
 
             let pCalcMana = p.mana, oCalcMana = opponent.mana, combatCancelled = false;
+            // ... (Battle Calculation Logic unchanged) ...
             [p, opponent].forEach(player => {
                 if (player.activePowerUp) {
                     const type = player.activePowerUp.type;
@@ -594,6 +555,7 @@ async function resolveConflict(room, p) {
                     player.activePowerUp = null;
                 }
             });
+
             if (!combatCancelled) {
                 if (pCalcMana >= oCalcMana) { 
                     p.mana += opponent.mana; 
@@ -641,7 +603,7 @@ async function resolveConflict(room, p) {
 
             if (p.mana >= gate.mana) {
                 p.mana += gate.mana;
-                delete room.world[coord];
+                delete room.world[coord]; // Gate removed here
                 if (gate.rank === 'Silver') {
                     if (!p.isAI && room.isOnline) {
                         await processWin(room, p.name);
@@ -745,9 +707,13 @@ function advanceTurn(room) {
     if (!room.players[nextIndex].alive) return;
 
     room.turn = nextIndex;
-
     const nextPlayer = room.players[room.turn];
     if (!nextPlayer) return; 
+
+    // CRITICAL FIX: Broadcast state immediately.
+    // This updates the client so you see the result of your move (Gate Removed, MP Up)
+    // AND informs you that it is now the AI's turn.
+    broadcastGameState(room); 
 
     if (aliveCount === 1 && !Object.values(room.world).some(g => g.rank === 'Silver')) {
         let sx, sy, validPos = false;
@@ -770,6 +736,7 @@ function advanceTurn(room) {
                 const silverMana = Math.floor(Math.random() * 15501) + 1500;
                 room.world[`${sx}-${sy}`] = { rank: 'Silver', color: '#fff', mana: silverMana };
                 io.to(room.id).emit('announcement', "SYSTEM: THE SILVER GATE HAS APPEARED NEARBY.");
+                broadcastGameState(room); // Broadcast silver gate spawn immediately
             }
         }
     }
@@ -796,8 +763,6 @@ function advanceTurn(room) {
             if (!isPathBlocked(room, nextPlayer.x, nextPlayer.y, tx, ty)) { nextPlayer.x = tx; nextPlayer.y = ty; await resolveConflict(room, nextPlayer); }
             if (rooms[room.id]) advanceTurn(room);
         }, 800);
-    } else {
-        broadcastGameState(room);
     }
 }
 
