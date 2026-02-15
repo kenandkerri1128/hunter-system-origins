@@ -32,7 +32,7 @@ const ADMIN_NAME = "Kei";
 const AI_NAMES = ["Sung Jinwoo", "Cha Hae-In", "Baek Yoonho", "Choi Jong-In"];
 const PLAYER_COLORS = ['#00d2ff', '#ff3e3e', '#bcff00', '#ff00ff']; 
 
-// UPDATED COLOR SCHEME TO MATCH YOUR REQUEST
+// UPDATED COLOR SCHEME
 const RANK_COLORS = { 
     'E': '#00ff00', // Green
     'D': '#99ff00', // Yellow Green
@@ -222,7 +222,8 @@ io.on('connection', (socket) => {
         
         rooms[id] = {
             id, name: data.name, isOnline: true, active: false, processing: false,
-            turn: 0, currentRoundMoves: 0, round: 1, survivorTurns: 0, respawnHappened: false,
+            turn: 0, currentRoundMoves: 0, round: 1, spawnCounter: 0, // NEW: Round Tracking
+            survivorTurns: 0, respawnHappened: false,
             players: [{ 
                 id: socket.id, name: data.host, slot: 0, ...CORNERS[0], 
                 mana, rankLabel: getFullRankLabel(mana), worldRankLabel: wr.label, 
@@ -276,7 +277,8 @@ io.on('connection', (socket) => {
         
         rooms[id] = {
             id, isOnline: false, active: false, processing: false, mode: data.diff,
-            turn: 0, currentRoundMoves: 0, round: 1, survivorTurns: 0, respawnHappened: false,
+            turn: 0, currentRoundMoves: 0, round: 1, spawnCounter: 0, // NEW: Round Tracking
+            survivorTurns: 0, respawnHappened: false,
             players: [
                 { id: socket.id, name: data.user, slot: 0, ...CORNERS[0], mana, rankLabel: getFullRankLabel(mana), alive: true, isAI: false, color: PLAYER_COLORS[0], quit: false, powerUp: null, isAdmin: (data.user === ADMIN_NAME), turnsWithoutBattle: 0, isStunned: false },
                 { id: 'ai1', name: AI_NAMES[1], slot: 1, ...CORNERS[1], mana: 200, rankLabel: "Lower D-Rank", alive: true, isAI: true, color: PLAYER_COLORS[1], quit: false, powerUp: null, turnsWithoutBattle: 0, isStunned: false },
@@ -560,16 +562,18 @@ function finishTurn(room) {
         }
     }
 
-    // --- ROUND TRACKING ---
+    // --- ROUND TRACKING & SPAWNING ---
     room.currentRoundMoves++;
     const livingCount = room.players.filter(p => p.alive).length;
     
     if (room.currentRoundMoves >= livingCount) {
+        // Round Finished
         room.currentRoundMoves = 0;
         room.round++;
         
         // SPAWN GATES EVERY 3 FULL ROUNDS
         if (room.round % 3 === 0) {
+            room.spawnCounter++;
             const count = 3 + rInt(3); // 3 to 5
             for(let i=0; i<count; i++) spawnGate(room);
             broadcastGameState(room);
@@ -729,6 +733,9 @@ function handleDisconnect(socket, isQuit) {
             } else {
                 io.to(room.id).emit('announcement', `${p.name} HAS QUIT.`);
             }
+            
+            // FORCE LEAVE SOCKET TO PREVENT RE-JOINING SAME ROOM ID
+            socket.leave(room.id);
 
             // --- CHECK FOR WINNER BY DEFAULT (PvP) ---
             const activeHumans = room.players.filter(pl => !pl.quit && !pl.isAI);
@@ -793,11 +800,16 @@ function spawnGate(room) {
 
     let tiers = [];
     if (room.respawnHappened) {
-        tiers = ['S', 'A']; 
+        tiers = ['S', 'A']; // High Level Only
     } else {
-        if (room.round <= 3) tiers = ['E', 'D'];
-        else if (room.round <= 6) tiers = ['D', 'C', 'B'];
-        else tiers = ['C', 'B', 'A'];
+        // Progressive Difficulty based on spawnCounter
+        if (room.spawnCounter <= 3) {
+            tiers = ['E', 'D'];
+        } else if (room.spawnCounter <= 5) {
+            tiers = ['E', 'D', 'C', 'B'];
+        } else {
+            tiers = ['A', 'B', 'C', 'D', 'E'];
+        }
     }
 
     const rank = tiers[rInt(tiers.length)];
