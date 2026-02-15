@@ -6,7 +6,7 @@
     <script src="/socket.io/socket.io.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Exo+2:ital,wght@1,900&family=Orbitron:wght@400;900&display=swap" rel="stylesheet">
     <style>
-        :root { --sys-blue: #00d2ff; --sys-red: #ff003c; --sys-gold: #ffcc00; --sys-silver: #ffffff; --sys-green: #00ff00; }
+        :root { --sys-blue: #00d2ff; --sys-red: #ff003c; --sys-gold: #ffcc00; --sys-silver: #ffffff; --sys-green: #00ff00; --sys-purple: #9d00ff; }
         body { background: #000; color: white; font-family: 'Exo 2', sans-serif; margin: 0; overflow: hidden; user-select: none; }
         h1, h2, h3 { font-family: 'Orbitron'; font-style: italic; color: var(--sys-blue); text-shadow: 0 0 10px var(--sys-blue); margin: 5px 0; }
         
@@ -260,7 +260,12 @@
         let currentHunterPowerUp = null;
         let currentGameState = null; // Stores game state for Victory calculations
 
-        const POWER_ICONS = { 'DOUBLE DAMAGE': '⚔️', 'GHOST WALK': '👣', 'NETHER SWAP': '🌀' };
+        const POWER_ICONS = { 
+            'DOUBLE DAMAGE': '⚔️', 
+            'GHOST WALK': '👣', 
+            'NETHER SWAP': '🌀',
+            'RULERS AUTHORITY': '👑' 
+        };
 
         // --- AUDIO ---
         const BGM = document.getElementById('bgm');
@@ -520,8 +525,14 @@
             const turnPlayer = state.players[state.turn];
             const isMyTurn = (me && me.id === turnPlayer.id && !state.processing); // Lock inputs if processing
             const ind = document.getElementById('turn-indicator');
-            ind.innerText = isMyTurn ? ">> YOUR TURN" : `>> ${turnPlayer.name.toUpperCase()}'S TURN`;
-            ind.style.color = turnPlayer.color;
+            
+            if(turnPlayer.isStunned) {
+                 ind.innerText = `>> ${turnPlayer.name.toUpperCase()} IS STUNNED (SKIP)`;
+                 ind.style.color = '#888';
+            } else {
+                 ind.innerText = isMyTurn ? ">> YOUR TURN" : `>> ${turnPlayer.name.toUpperCase()}'S TURN`;
+                 ind.style.color = turnPlayer.color;
+            }
 
             // 3. Power Up UI
             if (me && me.alive && me.powerUp) {
@@ -536,9 +547,10 @@
             // 4. Render Party (Left HUD)
             document.getElementById('ingame-party').innerHTML = state.players.map(p => {
                 const manaDisplay = (p.id === socket.id || (myHunter && myHunter.isAdmin)) ? p.mana : p.displayRank;
+                const stunIcon = p.isStunned ? '😵' : '';
                 return `
                 <div style="padding: 5px; border-bottom: 1px solid #333; margin-bottom:5px; opacity:${p.alive?1:0.3};">
-                    <div style="color:${p.color}; font-weight:900;">${p.isAdmin?'👑':''}${p.name} ${p.powerUp ? POWER_ICONS[p.powerUp]||'⭐' : ''}</div>
+                    <div style="color:${p.color}; font-weight:900;">${p.isAdmin?'👑':''}${p.name} ${stunIcon} ${p.powerUp ? POWER_ICONS[p.powerUp]||'⭐' : ''}</div>
                     <div style="display:flex; justify-content:space-between; font-size:0.8rem;">
                         <span>${p.worldRankLabel || ''}</span>
                         <span style="color:var(--sys-blue)">MP: ${manaDisplay}</span>
@@ -570,19 +582,32 @@
                     // B. Render Player
                     const pAtCell = state.players.find(p => p.alive && p.x === x && p.y === y);
                     if (pAtCell) {
+                         const stunStyle = pAtCell.isStunned ? 'opacity:0.5; filter:grayscale(100%);' : '';
                          cell.innerHTML = `
-                            <div class="humanoid">
+                            <div class="humanoid" style="${stunStyle}">
                                 <div class="name-tag" style="color:${pAtCell.color}">${pAtCell.isAdmin?'👑':''}${pAtCell.name}</div>
                                 <div class="h-head" style="border-color:${pAtCell.color}; box-shadow:0 0 5px ${pAtCell.color};"></div>
                                 <div class="h-body" style="border-color:${pAtCell.color}; box-shadow:0 0 5px ${pAtCell.color};"></div>
                             </div>`;
                     }
 
-                    // C. Render Valid Move (Only if My Turn + Alive + Not Processing + In Range)
-                    if (isMyTurn && me && me.alive) {
-                         const dist = Math.abs(me.x - x) + Math.abs(me.y - y);
-                         // Check Range (Client Side Visual)
-                         if (dist <= range && dist > 0) {
+                    // C. Render Valid Move (Only if My Turn + Alive + Not Processing + In Range + Not Stunned)
+                    if (isMyTurn && me && me.alive && !me.isStunned) {
+                         const dx = Math.abs(me.x - x);
+                         const dy = Math.abs(me.y - y);
+                         let isValid = false;
+
+                         if (dx === 0 && dy === 0) {
+                             isValid = false; // Self
+                         } else if (dx === 0 || dy === 0) {
+                             // Cardinal: Check Rank Range
+                             if ((dx + dy) <= range) isValid = true;
+                         } else {
+                             // Diagonal: Strictly 1 tile
+                             if (dx === 1 && dy === 1) isValid = true;
+                         }
+
+                         if (isValid) {
                              cell.classList.add('valid-move');
                              cell.onclick = () => socket.emit('playerAction', { tx: x, ty: y });
                          }
