@@ -32,8 +32,15 @@ const ADMIN_NAME = "Kei";
 const AI_NAMES = ["Sung Jinwoo", "Cha Hae-In", "Baek Yoonho", "Choi Jong-In"];
 const PLAYER_COLORS = ['#00d2ff', '#ff3e3e', '#bcff00', '#ff00ff']; 
 
+// COLOR SCHEME
 const RANK_COLORS = { 
-    'E': '#00ff00', 'D': '#99ff00', 'C': '#ffff00', 'B': '#ff9900', 'A': '#ff00ff', 'S': '#ff0000', 'Silver': '#ffffff' 
+    'E': '#00ff00', // Green
+    'D': '#99ff00', // Yellow Green
+    'C': '#ffff00', // Yellow
+    'B': '#ff9900', // Orange
+    'A': '#ff00ff', // Pink
+    'S': '#ff0000', // Red
+    'Silver': '#ffffff' // White
 };
 
 const POWER_UPS = ['DOUBLE DAMAGE', 'GHOST WALK', 'NETHER SWAP', 'RULERS AUTHORITY'];
@@ -128,8 +135,10 @@ function syncAllGates() {
     io.emit('updateGateList', list);
 }
 
+// --- SOCKET LOGIC ---
 io.on('connection', (socket) => {
     
+    // 1. ADMIN ACTIONS
     socket.on('adminAction', (data) => {
         if (socket.id !== adminSocketId) return; 
         if (data.action === 'kick' && connectedUsers[data.target]) {
@@ -143,6 +152,7 @@ io.on('connection', (socket) => {
         }
     });
 
+    // 2. AUTHENTICATION
     socket.on('authRequest', async (data) => {
         if (connectedUsers[data.u]) {
             const old = io.sockets.sockets.get(connectedUsers[data.u]);
@@ -281,6 +291,7 @@ io.on('connection', (socket) => {
         startGame(rooms[id]);
     });
 
+    // 5. IN-GAME ACTIONS
     socket.on('activateSkill', (data) => {
         const r = Object.values(rooms).find(rm => rm.players.some(p => p.id === socket.id));
         if(r && r.processing) {
@@ -295,7 +306,7 @@ io.on('connection', (socket) => {
 
     socket.on('playerAction', (data) => {
         const r = Object.values(rooms).find(rm => rm.players.some(p => p.id === socket.id));
-        if(!r || !r.active || r.processing) return;
+        if(!r || !r.active || r.processing) return; 
         
         const p = r.players[r.turn];
         if(!p || p.id !== socket.id) return;
@@ -337,8 +348,10 @@ function processMove(room, player, tx, ty) {
     const gate = room.world[gateKey];
 
     if (enemy || gate) {
+        // *** FIX: Track Battle Participants ***
         room.currentBattle = { attacker: player.id, defender: enemy ? enemy.id : 'gate' };
-        broadcastGameState(room); // Forced broadcast so UI sees currentBattle participants
+        // *** FIX: Broadcast IMMEDIATELY so client sees battle state ***
+        broadcastGameState(room); 
 
         io.to(room.id).emit('battleStart', {
             hunter: player.name, hunterColor: player.color, hunterMana: player.mana,
@@ -356,7 +369,7 @@ function processMove(room, player, tx, ty) {
 
 function resolveBattle(room, attacker, defender, isGate) {
     if(!room.active) return;
-    room.currentBattle = null;
+    room.currentBattle = null; // Clear battle state
     attacker.turnsWithoutBattle = 0;
     if(!isGate) defender.turnsWithoutBattle = 0;
 
@@ -365,7 +378,6 @@ function resolveBattle(room, attacker, defender, isGate) {
     let cancel = false;
     let autoWin = false;
 
-    // Runes Logic
     if (attacker.activeBuff === 'DOUBLE DAMAGE') attMana *= 2;
     if (attacker.activeBuff === 'RULERS AUTHORITY' && (!isGate || defender.rank !== 'Silver')) autoWin = true;
     if (attacker.activeBuff === 'GHOST WALK') { cancel = true; teleport(attacker); }
@@ -385,6 +397,10 @@ function resolveBattle(room, attacker, defender, isGate) {
             if(isGate) {
                 delete room.world[`${attacker.x}-${attacker.y}`];
                 if(defender.rank === 'Silver') return handleWin(room, attacker.name);
+                if(!attacker.powerUp && Math.random() < 0.2) {
+                    attacker.powerUp = POWER_UPS[Math.floor(Math.random() * POWER_UPS.length)];
+                    io.to(attacker.id).emit('announcement', `OBTAINED RUNE: ${attacker.powerUp}`);
+                }
             } else {
                 defender.alive = false;
                 if(!room.isOnline) dbUpdateHunter(defender.name, -1, false);
@@ -424,7 +440,8 @@ function finishTurn(room) {
     if(justPlayed && justPlayed.alive) justPlayed.turnsWithoutBattle++;
 
     room.currentRoundMoves++;
-    if (room.currentRoundMoves >= room.players.filter(p => p.alive).length) {
+    const activeList = room.players.filter(p => p.alive);
+    if (room.currentRoundMoves >= activeList.length) {
         room.currentRoundMoves = 0;
         room.round++;
         if (room.round % 3 === 0) {
@@ -468,11 +485,17 @@ function handleDisconnect(socket, isQuit) {
     const room = Object.values(rooms).find(r => r.players.some(p => p.id === socket.id));
     if(room) {
         // *** FIX: WAITING ROOM DISCONNECT ***
+        // If not active, simply remove player. Do not penalize, do not trigger win.
         if (!room.active) {
-            room.players = room.players.filter(pl => pl.id !== socket.id);
-            if (room.players.length === 0) delete rooms[room.id];
-            else io.to(room.id).emit('waitingRoomUpdate', room);
+            const index = room.players.findIndex(pl => pl.id === socket.id);
+            if (index !== -1) {
+                room.players.splice(index, 1);
+                if (room.players.length === 0) delete rooms[room.id];
+                else io.to(room.id).emit('waitingRoomUpdate', room);
+            }
             syncAllGates();
+            const u = Object.keys(connectedUsers).find(key => connectedUsers[key] === socket.id);
+            if(u) delete connectedUsers[u];
             return;
         }
 
@@ -490,9 +513,10 @@ function handleDisconnect(socket, isQuit) {
         if(room.players.filter(pl => !pl.quit && !pl.isAI).length === 0) delete rooms[room.id]; 
         syncAllGates();
     }
+    const u = Object.keys(connectedUsers).find(key => connectedUsers[key] === socket.id);
+    if(u) delete connectedUsers[u];
 }
 
-// Logic for spawning gates and AI move (rest of code) continues here...
 function spawnGate(room) {
     let sx, sy;
     do { sx=rInt(15); sy=rInt(15); } while(room.players.some(p=>p.x===sx && p.y===sy) || room.world[`${sx}-${sy}`]);
@@ -537,7 +561,7 @@ function broadcastGameState(room) {
                 powerUp: (pl.id===p.id || pl.isAdmin) ? pl.powerUp : null,
                 displayRank: getDisplayRank(pl.mana)
             }));
-            socket.emit('gameStateUpdate', { ...room, players: sanitized });
+            socket.emit('gameStateUpdate', { ...room, players: sanitized, currentBattle: room.currentBattle }); // Send battle info
         }
     });
 }
