@@ -25,6 +25,7 @@
         #game-board { display: grid; grid-template-columns: repeat(15, 42px); gap: 2px; background: #111; border: 4px solid var(--sys-blue); }
         .cell { width: 42px; height: 42px; background: #000; position: relative; border: 0.5px solid #1a1a1a; }
         .valid-move { box-shadow: inset 0 0 0 3px var(--sys-blue); cursor: pointer; z-index: 5; }
+        .valid-move:hover { background: rgba(0, 210, 255, 0.2); }
         
         /* Characters */
         .humanoid { position: absolute; bottom: 5px; left: 50%; transform: translateX(-50%); width: 24px; height: 30px; z-index: 10; pointer-events: none; }
@@ -203,7 +204,6 @@
 
         const POWER_ICONS = { 'DOUBLE DAMAGE': '⚔️', 'GHOST WALK': '👣', 'NETHER SWAP': '🌀' };
 
-        // CRITICAL FIX: Pre-load identity to prevent freeze if GameState arrives before AuthSuccess
         window.onload = function() {
             const stored = sessionStorage.getItem('hunter_creds');
             if(stored) {
@@ -213,10 +213,7 @@
                         document.getElementById('u').value = c.u;
                         document.getElementById('p').value = c.p;
                         currentPass = c.p;
-                        
-                        // Temporary identity to allow GameState to render immediately
                         myHunter = { username: c.u, isAdmin: (c.u === 'Kei') }; 
-                        
                         socket.emit('authRequest', { type: 'login', u: c.u, p: c.p });
                     }
                 } catch(e) {}
@@ -230,7 +227,7 @@
         }
 
         function playMusic(track) {
-            if(!track) return; // FIX: Don't stop music if server sends null (reconnect)
+            if(!track) return;
             const audio = document.getElementById('bgm');
             if (currentBGM === track) return;
             currentBGM = track;
@@ -257,7 +254,6 @@
             if(data.isAdmin) msg.className = "admin-chat-msg";
             const nameStyle = data.isAdmin ? "class='admin-glow'" : "style='color:var(--sys-blue)'";
             const crown = data.isAdmin ? "👑 " : "";
-            
             msg.innerHTML = `<b ${nameStyle}>[${data.rank}] ${crown}${data.sender}:</b> ${data.text}`;
             chatBox.appendChild(msg);
             chatBox.scrollTop = chatBox.scrollHeight;
@@ -298,15 +294,12 @@
             const list = document.getElementById('world-rank-list');
             const limit = showingFullRankings ? 100 : 10;
             const playersToShow = currentWorldRankings.slice(0, limit);
-            
             list.innerHTML = playersToShow.map((h, i) => {
                 let rankColor = 'white';
                 if (i < 3) rankColor = 'var(--sys-gold)';
                 else if (i < 10) rankColor = 'var(--sys-red)';
-
                 const adminClass = h.isAdmin ? "class='admin-glow'" : "";
                 const crown = h.isAdmin ? "👑 " : "";
-
                 return `
                 <div style="display:flex; justify-content:space-between; padding:5px; border-bottom:1px solid #222; font-weight:900; color:${rankColor};">
                     <span ${adminClass}>#${i+1} ${crown}${h.username}</span>
@@ -344,7 +337,7 @@
             document.getElementById('auth-msg').innerText = "";
             if(!u || !p) { document.getElementById('auth-msg').innerText = "ENTER ALL CREDENTIALS"; return; }
             currentPass = p;
-            myHunter = { username: u }; // Optimistic set
+            myHunter = { username: u }; 
             socket.emit('authRequest', { type, u, p }); 
         }
 
@@ -359,10 +352,8 @@
             document.getElementById('st-mp').innerText = `HuP: ${d.mana}`; 
             document.getElementById('st-stats').innerText = `WINS: ${d.wins || 0} | LOSSES: ${d.losses || 0}`;
             document.getElementById('st-world-rank').innerText = `WORLD RANK: #${d.worldRank || '--'}`;
-            
             document.getElementById('admin-panel').style.display = d.isAdmin ? 'flex' : 'none';
 
-            // Only obey last_screen if we are NOT already in a game (which sets screen to game via gameStart)
             const currentScreen = document.querySelector('.screen.active').id;
             if(currentScreen !== 'screen-game') {
                 const lastScreen = sessionStorage.getItem('last_screen');
@@ -379,7 +370,6 @@
         function doAdmin(action) {
             const target = document.getElementById('admin-target').value;
             const msg = document.getElementById('admin-broadcast').value;
-            
             if(action === 'kick') socket.emit('adminAction', { action: 'kick', target });
             if(action === 'broadcast') socket.emit('adminAction', { action: 'broadcast', message: msg });
             if(action === 'spectate') {
@@ -418,7 +408,6 @@
             showScreen('screen-waiting');
             document.getElementById('waiting-title').innerText = `GATE: ${room.name}`;
             if(myRoomID !== room.id) socket.emit('joinChatRoom', room.id);
-
             const container = document.getElementById('waiting-list');
             container.innerHTML = room.players.map(p => {
                 const adminClass = p.isAdmin ? "class='admin-glow'" : "";
@@ -428,7 +417,6 @@
                     <span>${p.confirmed ? '<b style="color:var(--sys-green)">READY</b>' : 'WAITING'}</span>
                 </div>`;
             }).join('');
-
             const me = room.players.find(p => p.name === myHunter.username);
             const btn = document.getElementById('btn-ready');
             if(me && me.confirmed) {
@@ -444,7 +432,6 @@
 
         function playerConfirm() { if(currentGateID) socket.emit('playerConfirm', { gateID: currentGateID }); }
         
-        // FIXED: Clear Gate ID to prevent Ghost Transport
         function leaveWaitingRoom() { 
             currentGateID = null;
             socket.emit('quitGame'); 
@@ -463,7 +450,6 @@
         }
 
         socket.on('gameStart', (data) => { 
-            // FIX: Force Chat Room join here for sync
             if(data && data.roomId) {
                 myRoomID = data.roomId;
                 socket.emit('joinChatRoom', data.roomId);
@@ -487,7 +473,7 @@
             const defenderColor = data.targetColor || '#fff';
             vsData.innerHTML = `<div style="font-weight:900; color:white;"><span style="color:${attackerColor}">${data.hunter}</span> <span style="color:var(--sys-red)">VS</span> <span style="color:${defenderColor}">${data.target}</span></div><div style="font-size:12px; color:var(--sys-blue); margin-top:5px;">${data.targetRank}</div>`;
             skillArea.innerHTML = "";
-            if (data.hunter === myHunter.username && data.hunterPowerUp) {
+            if (myHunter && data.hunter === myHunter.username && data.hunterPowerUp) {
                 const btn = document.createElement('button');
                 btn.className = 'skill-activate-btn';
                 btn.innerHTML = `ACTIVATE ${POWER_ICONS[data.hunterPowerUp] || ''} ${data.hunterPowerUp}`;
@@ -500,49 +486,41 @@
 
         socket.on('gameStateUpdate', (s) => {
             if (!s.active) return; 
-
-            // FIX: Self-repair UI if battle is stuck
             document.getElementById('vs-panel').style.display = 'none';
-            
             const board = document.getElementById('game-board');
             board.innerHTML = "";
 
-            // FIX: Robust check for "me". If state arrives before Auth, we use socket.id from server or match by name
-            let me = s.players.find(p => p.id === socket.id);
-            if (!me && myHunter) {
-                me = s.players.find(p => p.name === myHunter.username);
-            }
-
-            // Only block rendering if we truly don't know who we are (unlikely with window.onload fix)
-            if(!me && (!myHunter || !myHunter.isAdmin)) return; 
+            // CRITICAL FIX: Dual-Check identity
+            let meInGame = s.players.find(p => p.id === socket.id || (myHunter && p.name === myHunter.username));
+            if(!meInGame && (!myHunter || !myHunter.isAdmin)) return; 
             
-            const observer = me || { x: -10, y: -10 }; 
-
-            const isTurn = me ? (s.players[s.turn].id === socket.id || s.players[s.turn].name === observer.name) : false;
+            const observer = meInGame || { x: -10, y: -10 }; 
+            const turnPlayer = s.players[s.turn];
             
+            // Movement interaction logic
+            const isMyTurn = turnPlayer && (turnPlayer.id === socket.id || (myHunter && turnPlayer.name === myHunter.username));
+
             const silverGate = Object.values(s.world).find(cell => cell.rank === 'Silver');
             document.getElementById('tc-silver-container').style.display = silverGate ? 'block' : 'none';
             if(silverGate) document.getElementById('silver-power').innerText = silverGate.mana;
 
             document.getElementById('tc-spawn').innerText = 3 - (s.globalTurns % 3);
-            document.getElementById('turn-txt').innerText = isTurn ? ">> YOUR MOVE" : `>> ${s.players[s.turn].name.toUpperCase()} ACTING`;
+            document.getElementById('turn-txt').innerText = isMyTurn ? ">> YOUR MOVE" : `>> ${turnPlayer ? turnPlayer.name.toUpperCase() : 'SYSTEM'} ACTING`;
 
             document.getElementById('party-list').innerHTML = s.players.map(p => {
                 let status = p.quit ? '(QUIT)' : (p.alive ? '' : '(KIA)');
                 let rLabel = p.displayRank || 'Rank E'; 
                 const wRankIdx = currentWorldRankings.findIndex(h => h.username === p.name);
                 const wRankDisplay = wRankIdx !== -1 ? `#${wRankIdx + 1}` : '#??';
-                
                 const pUpIcon = p.powerUp ? ` <span style="color:var(--sys-gold); animation: pulse 0.5s infinite alternate;">${POWER_ICONS[p.powerUp]}</span>` : '';
-                const mpValue = (p.id === socket.id || (myHunter && myHunter.isAdmin)) ? `MP: ${p.mana}` : rLabel;
-
+                const isMe = (p.id === socket.id || (myHunter && p.name === myHunter.username));
+                const mpValue = (isMe || (myHunter && myHunter.isAdmin)) ? `MP: ${p.mana}` : rLabel;
                 const adminClass = p.isAdmin ? "class='admin-glow'" : "";
                 const crown = p.isAdmin ? "👑 " : "";
-
                 return `<div class="party-member" style="color:${p.quit ? '#444' : p.color}">
                             <div style="font-size: 10px; color: #888; display:flex; justify-content: space-between;">
                                 <span>WORLD RANK: ${wRankDisplay}</span>
-                                <span ${adminClass}>${p.id === socket.id || (myHunter && myHunter.isAdmin) ? rLabel : ''}</span>
+                                <span ${adminClass}>${isMe || (myHunter && myHunter.isAdmin) ? rLabel : ''}</span>
                             </div>
                             <div style="display:flex; justify-content:space-between;">
                                 <span ${adminClass}>${crown}${p.name}${pUpIcon}</span>
@@ -558,9 +536,14 @@
                     if(s.world[`${x}-${y}`]) cell.style.backgroundColor = s.world[`${x}-${y}`].color;
                     
                     const dist = Math.abs(observer.x - x) + Math.abs(observer.y - y);
-                    if(isTurn && dist <= (s.mode === 'Monarch' ? 3 : 2) && dist > 0) {
+                    
+                    // INTERACTION FIX: Force cell clickability if turn and range match
+                    if(isMyTurn && dist <= (s.mode === 'Monarch' ? 3 : 2) && dist > 0) {
                         cell.classList.add('valid-move');
-                        cell.onclick = () => socket.emit('playerAction', { tx: x, ty: y });
+                        cell.onclick = () => {
+                            console.log(`System: Emitting move to ${x},${y}`);
+                            socket.emit('playerAction', { tx: x, ty: y });
+                        };
                     }
 
                     s.players.forEach(p => {
@@ -570,7 +553,6 @@
                             const adminClass = p.isAdmin ? "admin-glow" : "";
                             const crown = p.isAdmin ? "👑 " : "";
                             const pUpIcon = p.powerUp ? ` ${POWER_ICONS[p.powerUp]}` : '';
-                            
                             h.innerHTML = `<div class="name-tag ${adminClass}" style="color:${p.color}">
                                                 ${crown}${p.name}${pUpIcon} <span style="font-size:8px; color:#ccc; display:block;">[${p.displayRank || 'E'}]</span>
                                            </div>
@@ -584,7 +566,6 @@
             }
         });
 
-        // FIXED: Quit Action
         function quitAction() { socket.emit('quitGame'); }
         
         socket.on('returnToProfile', () => { resetGameUI(); showScreen('screen-menu'); });
