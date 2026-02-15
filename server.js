@@ -289,7 +289,7 @@ io.on('connection', (socket) => {
         const p = r.players[r.turn];
         if(!p || p.id !== socket.id) return; // NOT YOUR TURN
 
-        // Valid Move Check (Distance 1 unless Monarch AI)
+        // Valid Move Check (Distance 1)
         const dist = Math.abs(p.x - data.tx) + Math.abs(p.y - data.ty);
         if(dist > 1) return; 
 
@@ -303,7 +303,7 @@ io.on('connection', (socket) => {
 
 
 // =========================================================
-//  THE NEW GAME ENGINE (SIMPLIFIED & ROBUST)
+//  THE NEW GAME ENGINE (SILVER MONARCH & POWERUPS ADDED)
 // =========================================================
 
 function startGame(room) {
@@ -341,9 +341,11 @@ function processMove(room, player, tx, ty) {
 
     } else if (gate) {
         // --- PVE BATTLE ---
+        const isMonarch = (gate.rank === 'Silver');
         io.to(room.id).emit('battleStart', {
             hunter: player.name, hunterColor: player.color, hunterMana: player.mana,
-            target: `RANK ${gate.rank}`, targetColor: gate.color, targetRank: `MP: ${gate.mana}`
+            target: isMonarch ? "SILVER MONARCH" : `RANK ${gate.rank}`, 
+            targetColor: gate.color, targetRank: `MP: ${gate.mana}`
         });
 
         // 5s Delay
@@ -364,28 +366,50 @@ function resolveBattle(room, attacker, defender, isGate) {
     let defMana = defender.mana;
     let cancel = false;
 
-    // 1. Apply Powerups
+    // 1. APPLY POWERUPS
     if(attacker.activeBuff === 'DOUBLE DAMAGE') attMana *= 2;
     if(attacker.activeBuff === 'GHOST WALK') {
         cancel = true;
         teleport(attacker);
         io.to(room.id).emit('announcement', `${attacker.name} USED GHOST WALK!`);
     }
+    if(attacker.activeBuff === 'NETHER SWAP') {
+        // Find a random living player to swap with (not the defender)
+        const others = room.players.filter(p => p.id !== attacker.id && p.id !== defender.id && p.alive);
+        if(others.length > 0) {
+            cancel = true;
+            const target = others[Math.floor(Math.random() * others.length)];
+            // Swap Coords
+            const tx = attacker.x; const ty = attacker.y;
+            attacker.x = target.x; attacker.y = target.y;
+            target.x = tx; target.y = ty;
+            io.to(room.id).emit('announcement', `${attacker.name} SWAPPED WITH ${target.name}!`);
+        } else {
+            // Fallback if no one to swap with (Solo/Final), act as Ghost Walk
+            cancel = true;
+            teleport(attacker);
+            io.to(room.id).emit('announcement', `${attacker.name} NETHER SWAP (SOLO) -> TELEPORT!`);
+        }
+    }
+    
+    // Defender Powerups (Only if Player)
     if(!isGate && defender.activeBuff === 'DOUBLE DAMAGE') defMana *= 2;
-    // Nether Swap Logic omitted for simplicity as requested, but structure allows it easily
 
     attacker.activeBuff = null; 
     if(!isGate) defender.activeBuff = null;
 
-    // 2. Combat Math
+    // 2. COMBAT RESOLUTION
     if(!cancel) {
         if(attMana >= defMana) {
             // ATTACKER WINS
             attacker.mana += defender.mana;
             if(isGate) {
                 delete room.world[`${attacker.x}-${attacker.y}`];
-                if(defender.rank === 'Silver') return handleWin(room, attacker.name); // WIN CONDITION
-                // Chance for Powerup
+                if(defender.rank === 'Silver') {
+                     // VICTORY CONDITION
+                     return handleWin(room, attacker.name); 
+                }
+                // Chance for Powerup (20%)
                 if(!attacker.powerUp && Math.random() < 0.2) {
                     attacker.powerUp = POWER_UPS[Math.floor(Math.random() * POWER_UPS.length)];
                     io.to(attacker.id).emit('announcement', `OBTAINED RUNE: ${attacker.powerUp}`);
@@ -404,27 +428,35 @@ function resolveBattle(room, attacker, defender, isGate) {
 
     io.to(room.id).emit('battleEnd');
 
-    // 3. Check for Game Over (Last Man Standing)
+    // 3. CHECK LAST MAN STANDING / SILVER MONARCH SPAWN
     const aliveHumans = room.players.filter(p => p.alive && !p.isAI);
     const aliveTotal = room.players.filter(p => p.alive);
 
-    if(aliveTotal.length === 1 && aliveHumans.length === 1) {
-        // TRIGGER SILVER GATE PHASE
-        const survivor = aliveHumans[0];
+    if (aliveTotal.length === 1 && aliveHumans.length === 1) {
+        // Only one player left? SPAWN SILVER MONARCH
         const silverGate = Object.values(room.world).find(g => g.rank === 'Silver');
-        
         if(!silverGate) {
-            // Spawn Silver Gate if not exists
             let sx, sy;
+            // Find empty spot
             do { sx=rInt(15); sy=rInt(15); } while(room.players.some(p=>p.x===sx && p.y===sy) || room.world[`${sx}-${sy}`]);
-            room.world[`${sx}-${sy}`] = { rank: 'Silver', color: '#fff', mana: Math.floor(Math.random()*10000)+2000 };
-            io.to(room.id).emit('announcement', "SYSTEM: THE SILVER GATE HAS APPEARED.");
+            
+            // Random Stats 1500 - 17000
+            const smMana = Math.floor(Math.random() * (17000 - 1500 + 1)) + 1500;
+            room.world[`${sx}-${sy}`] = { rank: 'Silver', color: '#fff', mana: smMana };
+            
+            io.to(room.id).emit('announcement', `SYSTEM: THE SILVER MONARCH [MP:${smMana}] HAS DESCENDED! DEFEAT IT IN 5 TURNS!`);
             room.survivorTurns = 0;
         }
     } else if (aliveHumans.length === 0 && room.isOnline) {
-        // Everyone died
-        endRoom(room); 
-        return;
+        // Everyone died - If Silver Monarch existed, logic handles respawn in finishTurn or here?
+        // Actually if 0 humans left, room should close or respawn if they died to Monarch.
+        // Let's rely on finishTurn to catch the respawn trigger if needed, or close room.
+        // If they died to Monarch, triggerRespawn is needed.
+        const sm = Object.values(room.world).find(g => g.rank === 'Silver');
+        if(sm) {
+            triggerRespawn(room, null); // Null ID = generic respawn
+            return;
+        }
     }
 
     finishTurn(room);
@@ -441,11 +473,13 @@ function finishTurn(room) {
         broadcastGameState(room);
     }
 
-    // Survivor Logic (Respawn if too long)
+    // SURVIVOR / SILVER MONARCH TIMER
+    const silverGate = Object.values(room.world).find(g => g.rank === 'Silver');
     const alive = room.players.filter(p => p.alive);
-    if(alive.length === 1) {
+    
+    if (silverGate && alive.length === 1) {
         room.survivorTurns++;
-        if(room.survivorTurns > 8) {
+        if (room.survivorTurns >= 5) {
             triggerRespawn(room, alive[0].id);
             return;
         }
@@ -457,6 +491,12 @@ function finishTurn(room) {
         room.turn = (room.turn + 1) % room.players.length;
         attempts++;
     } while(!room.players[room.turn].alive && attempts < 5);
+
+    // If loop failed (everyone dead), trigger respawn
+    if (!room.players[room.turn].alive) {
+        triggerRespawn(room, null);
+        return;
+    }
 
     broadcastGameState(room);
 
@@ -514,8 +554,10 @@ function handleWin(room, winnerName) {
     io.to(room.id).emit('victoryEvent', { winner: winnerName });
     room.active = false;
     
-    if(room.isOnline) dbUpdateHunter(winnerName, 20, true);
-    else dbUpdateHunter(winnerName, 5, true);
+    // UPDATED HUP CALCULATIONS
+    // Online Win: +20, Solo/AI Win: +5
+    const points = room.isOnline ? 20 : 5;
+    dbUpdateHunter(winnerName, points, true);
 
     broadcastWorldRankings();
 
@@ -532,11 +574,9 @@ function handleDisconnect(socket, isQuit) {
         const p = room.players.find(pl => pl.id === socket.id);
         if(isQuit) {
             p.quit = true; p.alive = false;
-            if(room.isOnline) dbUpdateHunter(p.name, -20, false);
+            if(room.isOnline) dbUpdateHunter(p.name, -20, false); // QUIT PENALTY
             io.to(room.id).emit('announcement', `${p.name} HAS QUIT.`);
             if(p === room.players[room.turn]) finishTurn(room);
-        } else {
-            // Just disconnected, keep in room for reconnect
         }
         
         // Clean empty rooms
@@ -550,17 +590,21 @@ function handleDisconnect(socket, isQuit) {
 }
 
 function triggerRespawn(room, survivorId) {
-    io.to(room.id).emit('announcement', "SYSTEM: QUEST FAILED. RESPAWNING...");
+    io.to(room.id).emit('announcement', "SYSTEM: TIME LIMIT EXCEEDED / HERO FALLEN. REAWAKENING PROTOCOL...");
     room.respawnHappened = true;
-    room.world = {};
+    room.world = {}; // Clear Gates (Despawns Monarch)
     room.survivorTurns = 0;
+    
     room.players.forEach(p => {
         if(!p.quit) {
             p.alive = true;
-            if(p.id !== survivorId) p.mana += 500; // Boost losers
+            if(p.id !== survivorId) p.mana += 500; // Catchup mechanic
         }
     });
+    
+    // Respawn standard gates
     for(let i=0; i<5; i++) spawnGate(room);
+    
     finishTurn(room);
 }
 
@@ -569,6 +613,7 @@ function spawnGate(room) {
     do { sx=rInt(15); sy=rInt(15); safe++; } while((room.players.some(p=>p.x===sx && p.y===sy) || room.world[`${sx}-${sy}`]) && safe<50);
     if(safe>=50) return;
 
+    // Standard Gate Logic (No Silver Monarch here)
     const tiers = room.respawnHappened ? ['A','S'] : ['E','D','C','B'];
     const rank = tiers[rInt(tiers.length)];
     const range = { 'E':[10,100], 'D':[101,200], 'C':[201,400], 'B':[401,600], 'A':[601,900], 'S':[901,1500] }[rank];
@@ -584,7 +629,6 @@ function broadcastGameState(room) {
     room.players.forEach(p => {
         const socket = io.sockets.sockets.get(p.id);
         if(socket) {
-            // Hide enemy mana
             const sanitized = room.players.map(pl => ({
                 ...pl,
                 mana: (pl.id===p.id || pl.isAdmin) ? pl.mana : null,
