@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hunter System: Origin - Official Guide</title>
+    <link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@400;700&family=Orbitron:wght@400;900&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --sys-blue: #00d2ff;
+            --sys-gold: #ffcc00;
+            --sys-red: #ff0000;
+            --sys-pink: #ff00ff;
+            --sys-orange: #ff9900;
+            --sys-yellow: #ffff00;
+            --sys-ygreen: #99ff00;
+            --sys-green: #00ff00;
+        }
+
+        body {
+            background-color: #000;
+            color: #fff;
+            font-family: 'Exo 2', sans-serif;
+            margin: 0;
+            padding: 20px;
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            border: 2px solid var(--sys-blue);
+            padding: 40px;
+            background: rgba(0, 20, 40, 0.9);
+            box-shadow: 0 0 20px rgba(0, 210, 255, 0.3);
+        }
+
+        h1, h2, h3 {
+            font-family: 'Orbitron', sans-serif;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            color: var(--sys-blue);
+            border-bottom: 1px solid #333;
+            padding-bottom: 10px;
+        }
+
+        h1 { text-align: center; font-size: 2.5rem; color: var(--sys-gold); text-shadow: 0 0 10px var(--sys-gold); }
+
+        .rank-table, .hup-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        th, td {
+            border: 1px solid #444;
+            padding: 12px;
+            text-align: left;
+        }
+
+        th { background: #111; color: var(--sys-blue); }
+
+        .pro-tip {
+            border-left: 5px solid var(--sys-gold);
+            background: rgba(255, 204, 0, 0.1);
+            padding: 15px;
+            margin-top: 30px;
+            font-style: italic;
+        }
+
+        .citation {
+            font-size: 0.7rem;
+            vertical-align: super;
+            color: var(--sys-blue);
+            opacity: 0.7;
+            margin-left: 2px;
+        }
+
+        ul { list-style: none; padding-left: 0; }
+        li::before { content: "» "; color: var(--sys-blue); }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>Hunter System: Origin<span class="citation"></span></h1>
+    <p>Welcome to the Hunter System: Origin. This guide breaks down the core mechanics, movement laws, and strategies you need to survive the Gates and claim your spot at the top of the World Rankings.<span class="citation"></span></p>
+
+    <h2>1. The Ranking System (MP)<span class="citation"></span></h2>
+    <p>Your Mana Points (MP) determine your strength and your Rank. Higher MP means you can defeat stronger Gates and other players.<span class="citation"></span></p>
+    
+    <table class="rank-table">
+        <thead>
+            <tr>
+                <th>Rank</th>
+                <th>MP Range</th>
+                <th>Color</th>
+                <th>Move Range (Cardinal)</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr><td style="color:var(--sys-red)">Rank S</td><td>901+</td><td>Red</td><td>6 Tiles</td></tr>
+            <tr><td style="color:var(--sys-pink)">Rank A</td><td>701 - 900</td><td>Pink</td><td>5 Tiles</td></tr>
+            <tr><td style="color:var(--sys-orange)">Rank B</td><td>501 - 700</td><td>Orange</td><td>4 Tiles</td></tr>
+            <tr><td style="color:var(--sys-yellow)">Rank C</td><td>301 - 500</td><td>Yellow</td><td>3 Tiles</td></tr>
+            <tr><td style="color:var(--sys-ygreen)">Rank D</td><td>101 - 300</td><td>Yellow-Green</td><td>2 Tiles</td></tr>
+            <tr><td style="color:var(--sys-green)">Rank E</td><td>0 - 100</td><td>Green</td><td>1 Tile</td></tr>
+        </tbody>
+    </table>
+    <span class="citation"></span>
+
+    <h2>2. Movement Restrictions<span class="citation"></span></h2>
+    <p>Navigation is key. The grid is 15×15, and you must follow these two laws:<span class="citation"></span></p>
+    <ul>
+        <li><b>Cardinal Movement (N, S, E, W):</b> You can move in a straight line up to your current Rank’s range (e.g., a Rank C hunter can move 3 tiles up).<span class="citation"></span></li>
+        <li><b>Diagonal Movement:</b> Regardless of rank, diagonal steps are strictly limited to 1 tile. You cannot "snipe" someone diagonally from across the map.<span class="citation"></span></li>
+    </ul>
+
+    <h2>3. The Gate System<span class="citation"></span></h2>
+    <p>Gates are your primary source of MP. They spawn in waves every 3 whole rounds (meaning after every living player has finished their turn).<span class="citation"></span></p>
+    <ul>
+        <li><b>Difficulty Curve:</b> Early Game (Rank E and D gates), Mid Game (Rank C and B gates), Late Game (Rank A gates).<span class="citation"></span></li>
+        <li><b>Farming:</b> To defeat a gate, you must land on its tile. If your MP is higher than the gate’s MP, you absorb its power. If you are weaker, you will fall.<span class="citation"></span></li>
+    </ul>
+
+    <h2>4. Combat & Runes (Power-ups)<span class="citation"></span></h2>
+    <p>When you land on another player or a Gate, a 5-second Battle Phase begins.<span class="citation"></span></p>
+    <h3>Combat Rules<span class="citation"></span></h3>
+    <ul>
+        <li>The hunter with the higher MP wins.<span class="citation"></span></li>
+        <li>The winner absorbs the loser's MP.<span class="citation"></span></li>
+        <li>In PvP, the loser is eliminated.<span class="citation"></span></li>
+    </ul>
+    <h3>The Runes<span class="citation"></span></h3>
+    <p>Runes are randomly obtained by defeating Gates and can only be activated during the 5-second combat window.<span class="citation"></span></p>
+    <ul>
+        <li><b>⚔️ DOUBLE DAMAGE:</b> Doubles your MP for that battle only.<span class="citation"></span></li>
+        <li><b>👣 GHOST WALK:</b> Cancels the battle and teleports you to a safe, random location.<span class="citation"></span></li>
+        <li><b>🌀 NETHER SWAP:</b> Swaps your position with a random player. You absorb the MP of whoever loses the proxy battle and warp to a random living player.<span class="citation"></span></li>
+        <li><b>👑 RULER'S AUTHORITY:</b> An absolute win against any player or standard Gate (fails against the Silver Monarch).<span class="citation"></span></li>
+    </ul>
+
+    <h2>5. The Silver Monarch & Winning<span class="citation"></span></h2>
+    <p>The ultimate goal is to defeat the Silver Monarch.<span class="citation"></span></p>
+    <ul>
+        <li><b>Spawn Condition:</b> Descends only when one player remains (Total, including AIs).<span class="citation"></span></li>
+        <li><b>The Trial:</b> You have 5 turns to reach and defeat the Monarch.<span class="citation"></span></li>
+        <li><b>Power Level:</b> The Monarch’s MP ranges from 1,500 to infinity.<span class="citation"></span></li>
+        <li><b>Victory:</b> Defeating the Monarch ends the game and grants Hunter Points (HuP).<span class="citation"></span></li>
+        <li><b>The Reawakening:</b> If the last player loses or time hits zero, everyone respawns, gates are cleared, and Rank S and A gates appear everywhere.<span class="citation"></span></li>
+    </ul>
+
+    <h2>6. Hunter Points (HuP) & Penalties<span class="citation"></span></h2>
+    <p>HuP is your permanent currency for the World Rankings.<span class="citation"></span></p>
+    <table class="hup-table">
+        <thead>
+            <tr>
+                <th>Action</th>
+                <th>Online (PvP)</th>
+                <th>Solo (AI)</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr><td>Victory (Defeat Monarch)</td><td>+20 HuP</td><td>+5 HuP</td></tr>
+            <tr><td>Losing/Dying</td><td>-5 HuP</td><td>-1 HuP (Monarch Mode)</td></tr>
+            <tr><td>Quitting Mid-Game</td><td>-20 HuP</td><td>-1 HuP</td></tr>
+        </tbody>
+    </table>
+    <span class="citation"></span>
+
+    <div class="pro-tip">
+        <strong>Pro-Tip:</strong> If you are low on MP, focus on Rank E gates early. Don't engage other hunters until you've secured a Rune, specifically Ghost Walk, to protect yourself from S-Rank predators!<span class="citation"></span>
+    </div>
+</div>
+
+</body>
+</html>
