@@ -46,8 +46,11 @@ async function dbUpdateHunter(username, points, isWin) {
         const { data: u } = await supabase.from('Hunters').select('hunterpoints, wins, losses').eq('username', username).maybeSingle();
         if(u) {
             const updates = { hunterpoints: Math.max(0, u.hunterpoints + points) };
-            if(isWin) updates.wins = (u.wins || 0) + 1;
-            else updates.losses = (u.losses || 0) + 1;
+            // *** FIX: STRICT CHECK TO PREVENT FALSE LOSSES ON DEATH ***
+            if(isWin === true) updates.wins = (u.wins || 0) + 1;
+            else if(isWin === false) updates.losses = (u.losses || 0) + 1;
+            // If isWin is null, we only update points, not stats.
+            
             await supabase.from('Hunters').update(updates).eq('username', username);
         }
     } catch(e) {}
@@ -395,12 +398,14 @@ function resolveBattle(room, attacker, defender, isGate) {
                 }
             } else {
                 defender.alive = false;
-                if(!room.isOnline) dbUpdateHunter(defender.name, -1, false);
+                // *** FIX: PASS NULL SO STATS DONT UPDATE, ONLY POINTS (PENALTY) ***
+                if(!room.isOnline) dbUpdateHunter(defender.name, -1, null);
             }
         } else {
             if(!isGate) defender.mana += attacker.mana;
             attacker.alive = false;
-            if(!room.isOnline) dbUpdateHunter(attacker.name, -1, false);
+            // *** FIX: PASS NULL SO STATS DONT UPDATE, ONLY POINTS (PENALTY) ***
+            if(!room.isOnline) dbUpdateHunter(attacker.name, -1, null);
         }
     }
 
@@ -468,6 +473,7 @@ function handleWin(room, winnerName) {
     io.to(room.id).emit('victoryEvent', { winner: winnerName });
     room.active = false;
     dbUpdateHunter(winnerName, room.isOnline ? 20 : 5, true);
+    // Losers in online mode get a stat loss (false)
     if(room.isOnline) room.players.forEach(p => { if(p.name !== winnerName && !p.quit && !p.isAI) dbUpdateHunter(p.name, -5, false); });
     broadcastWorldRankings();
     setTimeout(() => { io.to(room.id).emit('returnToProfile'); delete rooms[room.id]; syncAllGates(); }, 6000);
@@ -492,6 +498,7 @@ function handleDisconnect(socket, isQuit) {
         const p = room.players.find(pl => pl.id === socket.id);
         if(isQuit) {
             p.quit = true; p.alive = false; 
+            // Quit = Loss stats (false)
             dbUpdateHunter(p.name, room.isOnline ? -20 : -1, false);
             socket.leave(room.id);
             socket.emit('returnToProfile'); 
@@ -522,9 +529,9 @@ function triggerRespawn(room, survivorId) {
             p.isStunned = false;
             teleport(p);
 
-            // *** FIX: Give bonus MP to everyone EXCEPT survivorId ***
-            // If survivorId is null (total wipeout), everyone gets it.
-            if (p.id !== survivorId) {
+            // *** FIX: Give bonus MP to everyone EXCEPT the winner. ***
+            // If survivorId is null (total wipeout), !survivorId is true, so everyone gets bonus.
+            if (!survivorId || p.id !== survivorId) {
                  p.mana += Math.floor(Math.random() * 1001) + 500;
             }
         }
@@ -578,7 +585,7 @@ function broadcastGameState(room) {
                 powerUp: (pl.id===p.id || pl.isAdmin) ? pl.powerUp : null,
                 displayRank: getDisplayRank(pl.mana)
             }));
-            socket.emit('gameStateUpdate', { ...room, players: sanitized, currentBattle: room.currentBattle }); // Send battle info
+            socket.emit('gameStateUpdate', { ...room, players: sanitized, currentBattle: room.currentBattle }); 
         }
     });
 }
