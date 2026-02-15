@@ -34,13 +34,7 @@ const PLAYER_COLORS = ['#00d2ff', '#ff3e3e', '#bcff00', '#ff00ff'];
 
 // COLOR SCHEME
 const RANK_COLORS = { 
-    'E': '#00ff00', // Green
-    'D': '#99ff00', // Yellow Green
-    'C': '#ffff00', // Yellow
-    'B': '#ff9900', // Orange
-    'A': '#ff00ff', // Pink
-    'S': '#ff0000', // Red
-    'Silver': '#ffffff' // White
+    'E': '#00ff00', 'D': '#99ff00', 'C': '#ffff00', 'B': '#ff9900', 'A': '#ff00ff', 'S': '#ff0000', 'Silver': '#ffffff' 
 };
 
 const POWER_UPS = ['DOUBLE DAMAGE', 'GHOST WALK', 'NETHER SWAP', 'RULERS AUTHORITY'];
@@ -348,9 +342,9 @@ function processMove(room, player, tx, ty) {
     const gate = room.world[gateKey];
 
     if (enemy || gate) {
-        // *** FIX: Track Battle Participants ***
+        // Track battle participants
         room.currentBattle = { attacker: player.id, defender: enemy ? enemy.id : 'gate' };
-        // *** FIX: Broadcast IMMEDIATELY so client sees battle state ***
+        // Broadcast IMMEDIATELY so client sees battle state
         broadcastGameState(room); 
 
         io.to(room.id).emit('battleStart', {
@@ -369,7 +363,7 @@ function processMove(room, player, tx, ty) {
 
 function resolveBattle(room, attacker, defender, isGate) {
     if(!room.active) return;
-    room.currentBattle = null; // Clear battle state
+    room.currentBattle = null;
     attacker.turnsWithoutBattle = 0;
     if(!isGate) defender.turnsWithoutBattle = 0;
 
@@ -403,11 +397,13 @@ function resolveBattle(room, attacker, defender, isGate) {
                 }
             } else {
                 defender.alive = false;
+                // **MONARCH PENALTY**
                 if(!room.isOnline) dbUpdateHunter(defender.name, -1, false);
             }
         } else {
             if(!isGate) defender.mana += attacker.mana;
             attacker.alive = false;
+            // **MONARCH PENALTY**
             if(!room.isOnline) dbUpdateHunter(attacker.name, -1, false);
         }
     }
@@ -484,8 +480,7 @@ function handleWin(room, winnerName) {
 function handleDisconnect(socket, isQuit) {
     const room = Object.values(rooms).find(r => r.players.some(p => p.id === socket.id));
     if(room) {
-        // *** FIX: WAITING ROOM DISCONNECT ***
-        // If not active, simply remove player. Do not penalize, do not trigger win.
+        // **FIX 1: WAITING ROOM DISCONNECT - No Penalty**
         if (!room.active) {
             const index = room.players.findIndex(pl => pl.id === socket.id);
             if (index !== -1) {
@@ -502,6 +497,7 @@ function handleDisconnect(socket, isQuit) {
         const p = room.players.find(pl => pl.id === socket.id);
         if(isQuit) {
             p.quit = true; p.alive = false; 
+            // **FIX 2: Monarch Penalty & Online Penalty**
             dbUpdateHunter(p.name, room.isOnline ? -20 : -1, false);
             socket.leave(room.id);
             socket.emit('returnToProfile'); 
@@ -515,6 +511,32 @@ function handleDisconnect(socket, isQuit) {
     }
     const u = Object.keys(connectedUsers).find(key => connectedUsers[key] === socket.id);
     if(u) delete connectedUsers[u];
+}
+
+function triggerRespawn(room, survivorId) {
+    io.to(room.id).emit('announcement', "SYSTEM: TIME LIMIT EXCEEDED / HERO FALLEN. REAWAKENING PROTOCOL...");
+    room.respawnHappened = true;
+    room.world = {}; 
+    room.survivorTurns = 0;
+    room.currentBattle = null;
+    room.processing = false;
+    
+    room.players.forEach(p => {
+        if(!p.quit) {
+            p.alive = true;
+            p.turnsWithoutBattle = 0;
+            p.isStunned = false;
+            // **FIX 3: TELEPORT ON RESPAWN**
+            teleport(p); 
+
+            if(survivorId && p.id !== survivorId) {
+                 p.mana += Math.floor(Math.random() * 1001) + 500;
+            }
+        }
+    });
+    
+    for(let i=0; i<5; i++) spawnGate(room);
+    finishTurn(room);
 }
 
 function spawnGate(room) {
@@ -561,7 +583,7 @@ function broadcastGameState(room) {
                 powerUp: (pl.id===p.id || pl.isAdmin) ? pl.powerUp : null,
                 displayRank: getDisplayRank(pl.mana)
             }));
-            socket.emit('gameStateUpdate', { ...room, players: sanitized, currentBattle: room.currentBattle }); // Send battle info
+            socket.emit('gameStateUpdate', { ...room, players: sanitized, currentBattle: room.currentBattle }); 
         }
     });
 }
