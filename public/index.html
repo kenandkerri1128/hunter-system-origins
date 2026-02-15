@@ -6,7 +6,7 @@
     <script src="/socket.io/socket.io.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Exo+2:ital,wght@1,900&family=Orbitron:wght@400;900&display=swap" rel="stylesheet">
     <style>
-        :root { --sys-blue: #00d2ff; --sys-red: #ff003c; --sys-gold: #ffcc00; --sys-silver: #c0c0c0; --sys-green: #00ff00; }
+        :root { --sys-blue: #00d2ff; --sys-red: #ff003c; --sys-gold: #ffcc00; --sys-silver: #ffffff; --sys-green: #00ff00; }
         body { background: #000; color: white; font-family: 'Exo 2', sans-serif; margin: 0; overflow: hidden; user-select: none; }
         h1, h2, h3 { font-family: 'Orbitron'; font-style: italic; color: var(--sys-blue); text-shadow: 0 0 10px var(--sys-blue); margin: 5px 0; }
         
@@ -36,9 +36,20 @@
         
         /* Game Board */
         #game-board { display: grid; grid-template-columns: repeat(15, 42px); gap: 2px; background: #111; border: 4px solid var(--sys-blue); box-shadow: 0 0 20px rgba(0, 210, 255, 0.2); }
-        .cell { width: 42px; height: 42px; background: #050505; position: relative; border: 0.5px solid #1a1a1a; }
+        .cell { width: 42px; height: 42px; background: #050505; position: relative; border: 0.5px solid #1a1a1a; transition: background 0.2s; }
         .valid-move { box-shadow: inset 0 0 0 2px var(--sys-blue); cursor: pointer; background: rgba(0, 210, 255, 0.1); z-index: 5; }
         .valid-move:hover { background: rgba(0, 210, 255, 0.3); }
+
+        /* Silver Monarch Special Visual */
+        .silver-monarch { 
+            box-shadow: 0 0 15px white, inset 0 0 10px white !important; 
+            animation: pulse-silver 1.5s infinite alternate; 
+            z-index: 2;
+        }
+        @keyframes pulse-silver { 
+            0% { box-shadow: 0 0 10px white, inset 0 0 5px white; } 
+            100% { box-shadow: 0 0 25px white, inset 0 0 15px white; } 
+        }
 
         /* Characters */
         .humanoid { position: absolute; bottom: 5px; left: 50%; transform: translateX(-50%); width: 24px; height: 30px; pointer-events: none; z-index: 10; }
@@ -499,7 +510,7 @@
         // --- CORE GAME UPDATE ---
         socket.on('gameStateUpdate', (state) => {
             if (!state.active) return;
-            currentGameState = state; // Save for Victory Screen
+            currentGameState = state; // Save for Victory Screen logic
 
             // 1. Identify "Me"
             let me = state.players.find(p => p.id === socket.id);
@@ -548,7 +559,9 @@
                     // A. Render Gate
                     if (state.world[key]) {
                         cell.style.backgroundColor = state.world[key].color;
-                        if(state.world[key].rank === 'Silver') cell.style.boxShadow = "0 0 10px white";
+                        if(state.world[key].rank === 'Silver') {
+                            cell.classList.add('silver-monarch');
+                        }
                     }
 
                     // B. Render Player
@@ -617,7 +630,7 @@
             const isMe = (myHunter && myHunter.username === data.winner);
             const info = document.getElementById('reward-info');
             
-            // FIX: Use stored state to check if Online or Solo
+            // Determine rewards based on Online vs Offline (AI)
             const isOnline = currentGameState ? currentGameState.isOnline : false;
 
             if (isMe) { 
