@@ -6,7 +6,7 @@
     <script src="/socket.io/socket.io.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Exo+2:ital,wght@1,900&family=Orbitron:wght@400;900&display=swap" rel="stylesheet">
     <style>
-        /* UPDATED COLOR PALETTE PER REQUEST */
+        /* UPDATED COLOR PALETTE */
         :root { 
             --sys-blue: #00d2ff; 
             --sys-gold: #ffcc00; 
@@ -276,7 +276,7 @@
         let currentBGM = "";
         let currentGateID = null;
         let currentHunterPowerUp = null;
-        let currentGameState = null; 
+        let currentGameState = null; // Stores game state for Victory calculations
 
         const POWER_ICONS = { 
             'DOUBLE DAMAGE': '⚔️', 
@@ -285,6 +285,7 @@
             'RULERS AUTHORITY': '👑' 
         };
 
+        // --- AUDIO ---
         const BGM = document.getElementById('bgm');
         function playTrack(name) {
             if(!name) return; 
@@ -295,6 +296,7 @@
             }
         }
 
+        // --- INIT & AUTH ---
         window.onload = function() {
             const stored = sessionStorage.getItem('hunter_creds');
             if(stored) {
@@ -312,7 +314,7 @@
         };
 
         function doLogout() {
-            currentGateID = null; 
+            currentGateID = null; // FORCE CLEAR
             sessionStorage.removeItem('hunter_creds');
             sessionStorage.removeItem('last_screen');
             location.reload();
@@ -336,6 +338,7 @@
         socket.on('authSuccess', (d) => {
             myHunter = d;
             sessionStorage.setItem('hunter_creds', JSON.stringify({u: d.username, p: currentPass}));
+            
             document.getElementById('p-name').innerText = d.username;
             document.getElementById('p-name').className = d.isAdmin ? 'admin-glow' : '';
             document.getElementById('p-rank').innerText = d.rank;
@@ -343,6 +346,7 @@
             document.getElementById('p-mp').innerText = `HuP: ${d.mana}`;
             document.getElementById('p-stats').innerText = `W: ${d.wins || 0} | L: ${d.losses || 0}`;
             document.getElementById('p-wr').innerText = `WORLD RANK #${d.worldRank || '--'}`;
+            
             if (d.isAdmin) document.getElementById('admin-controls').style.display = 'flex';
 
             const currentScreen = document.querySelector('.screen.active').id;
@@ -358,17 +362,21 @@
             if(d.music) playTrack(d.music);
         });
 
+        // --- CHAT SYSTEM ---
         let chatElement = null;
         function initChat() {
             const tpl = document.getElementById('chat-template');
             chatElement = tpl.firstElementChild.cloneNode(true);
             const btn = chatElement.querySelector('button');
             const inp = chatElement.querySelector('input');
+            
             const send = () => {
                 if (inp.value.trim() && myHunter) {
                     socket.emit('sendMessage', { 
-                        message: inp.value, senderName: myHunter.username, 
-                        roomId: myRoomID, rank: (myHunter.mana) ? getShortRankLabel(myHunter.mana) : 'Rank ?'
+                        message: inp.value, 
+                        senderName: myHunter.username, 
+                        roomId: myRoomID,
+                        rank: (myHunter.mana) ? getShortRankLabel(myHunter.mana) : 'Rank ?'
                     });
                     inp.value = '';
                 }
@@ -399,15 +407,23 @@
             box.scrollTop = box.scrollHeight;
         });
 
+        // --- NAVIGATION ---
         function showScreen(id) {
             document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
             document.getElementById(id).classList.add('active');
             if(id !== 'screen-auth') sessionStorage.setItem('last_screen', id);
 
-            if (id === 'screen-menu') { playTrack('menu.mp3'); moveChatTo('chat-global-anchor', 'global'); }
-            else if (id === 'screen-lobby') moveChatTo('chat-lobby-anchor', 'lobby_main');
-            else if (id === 'screen-waiting') moveChatTo('chat-waiting-anchor', currentGateID);
-            else if (id === 'screen-game') { playTrack('gameplay.mp3'); moveChatTo('chat-game-anchor', currentGateID); }
+            if (id === 'screen-menu') {
+                playTrack('menu.mp3');
+                moveChatTo('chat-global-anchor', 'global');
+            } else if (id === 'screen-lobby') {
+                moveChatTo('chat-lobby-anchor', 'lobby_main');
+            } else if (id === 'screen-waiting') {
+                moveChatTo('chat-waiting-anchor', currentGateID);
+            } else if (id === 'screen-game') {
+                playTrack('gameplay.mp3');
+                moveChatTo('chat-game-anchor', currentGateID);
+            }
         }
 
         function transportAnimation(callback) {
@@ -423,6 +439,7 @@
             }, 1500);
         }
 
+        // --- MENU / LOBBY LOGIC ---
         function renderRankings() {
             const el = document.getElementById('world-rank-list');
             el.innerHTML = currentWorldRankings.slice(0, 15).map((u, i) => `
@@ -439,47 +456,116 @@
             if (action === 'broadcast') socket.emit('adminAction', { action: 'broadcast', message: document.getElementById('adm-bc').value });
         }
 
-        function openOnlineLobby() { if(!myHunter) return; showScreen('screen-lobby'); socket.emit('requestGateList'); }
-        function createGate() { const name = document.getElementById('room-name').value; if (name) socket.emit('createGate', { host: myHunter.username, name }); }
+        function openOnlineLobby() {
+            if(!myHunter) return;
+            showScreen('screen-lobby');
+            socket.emit('requestGateList');
+        }
+
+        function createGate() {
+            const name = document.getElementById('room-name').value;
+            if (name) socket.emit('createGate', { host: myHunter.username, name });
+        }
 
         socket.on('updateGateList', (list) => {
             const el = document.getElementById('room-list');
-            el.innerHTML = list.map(r => `<div class="room-item" onclick="socket.emit('joinGate', {gateID: '${r.id}', user: myHunter.username})"><span>${r.name} ${myHunter.isAdmin ? `<small style="color:red">[${r.id}]</small>` : ''}</span><span style="color:var(--sys-blue)">${r.count}/4</span></div>`).join('');
+            el.innerHTML = list.map(r => `
+                <div class="room-item" onclick="socket.emit('joinGate', {gateID: '${r.id}', user: myHunter.username})">
+                    <span>${r.name} ${myHunter.isAdmin ? `<small style="color:red">[${r.id}]</small>` : ''}</span>
+                    <span style="color:var(--sys-blue)">${r.count}/4</span>
+                </div>
+            `).join('');
         });
 
+        // --- WAITING ROOM LOGIC ---
         socket.on('waitingRoomUpdate', (room) => {
             currentGateID = room.id;
             if (!document.getElementById('screen-waiting').classList.contains('active')) showScreen('screen-waiting');
             document.getElementById('wr-title').innerText = `GATE: ${room.name}`;
+            
             const el = document.getElementById('wr-players');
-            el.innerHTML = room.players.map(p => `<div style="padding: 10px; border-bottom: 1px solid #333; display: flex; justify-content: space-between; align-items: center;"><span style="color:${p.color}; font-weight:900;">${p.isAdmin?'👑':''}${p.name}</span><span style="font-size: 0.8rem; color: #888;">${p.worldRankLabel || ''}</span><span style="color:${p.confirmed ? 'var(--rank-e)' : '#444'}">${p.confirmed ? 'READY' : 'WAITING'}</span></div>`).join('');
+            el.innerHTML = room.players.map(p => `
+                <div style="padding: 10px; border-bottom: 1px solid #333; display: flex; justify-content: space-between; align-items: center;">
+                    <span style="color:${p.color}; font-weight:900;">${p.isAdmin?'👑':''}${p.name}</span>
+                    <span style="font-size: 0.8rem; color: #888;">${p.worldRankLabel || ''}</span>
+                    <span style="color:${p.confirmed ? 'var(--rank-e)' : '#444'}">${p.confirmed ? 'READY' : 'WAITING'}</span>
+                </div>
+            `).join('');
+
             const me = room.players.find(p => p.name === myHunter.username);
             const btn = document.getElementById('btn-ready');
-            if (me && me.confirmed) { btn.innerText = "WAITING..."; btn.style.opacity = 0.5; btn.disabled = true; } 
-            else { btn.innerText = "READY"; btn.style.opacity = 1; btn.disabled = false; }
+            if (me && me.confirmed) {
+                btn.innerText = "WAITING...";
+                btn.style.opacity = 0.5;
+                btn.disabled = true;
+            } else {
+                btn.innerText = "READY";
+                btn.style.opacity = 1;
+                btn.disabled = false;
+            }
         });
 
         function playerConfirm() { if(currentGateID) socket.emit('playerConfirm', { gateID: currentGateID }); }
-        function leaveWaitingRoom() { currentGateID = null; socket.emit('quitGame'); showScreen('screen-lobby'); socket.emit('requestGateList'); }
-        function startAI(diff) { transportAnimation(() => { socket.emit('startSoloAI', { user: myHunter.username, diff }); }); }
-        socket.on('gameStart', (data) => { currentGateID = data.roomId; transportAnimation(() => { showScreen('screen-game'); }); });
-        function quitAction() { socket.emit('quitGame'); currentGateID = null; document.getElementById('victory-screen').style.display = 'none'; showScreen('screen-menu'); }
-        socket.on('returnToProfile', () => { currentGateID = null; document.getElementById('victory-screen').style.display = 'none'; showScreen('screen-menu'); });
+        
+        function leaveWaitingRoom() { 
+            currentGateID = null;
+            socket.emit('quitGame'); 
+            showScreen('screen-lobby'); 
+            socket.emit('requestGateList'); 
+        }
 
+        // --- GAME LOGIC (REBUILT SIMPLE) ---
+        function startAI(diff) {
+            transportAnimation(() => { socket.emit('startSoloAI', { user: myHunter.username, diff }); });
+        }
+
+        socket.on('gameStart', (data) => {
+            currentGateID = data.roomId;
+            transportAnimation(() => { showScreen('screen-game'); });
+        });
+
+        function quitAction() { 
+            socket.emit('quitGame'); 
+            // CLIENT-SIDE IMMEDIATE EXIT
+            currentGateID = null;
+            document.getElementById('victory-screen').style.display = 'none';
+            showScreen('screen-menu');
+        }
+
+        socket.on('returnToProfile', () => {
+            currentGateID = null;
+            document.getElementById('victory-screen').style.display = 'none';
+            showScreen('screen-menu');
+        });
+
+        // --- CORE GAME UPDATE ---
         socket.on('gameStateUpdate', (state) => {
             if (!state.active) return;
-            currentGameState = state;
-            let me = state.players.find(p => p.id === socket.id) || state.players.find(p => p.name === myHunter.username);
+            currentGameState = state; // Save for Victory Screen logic
+
+            // 1. Identify "Me"
+            let me = state.players.find(p => p.id === socket.id);
+            if (!me && myHunter) me = state.players.find(p => p.name === myHunter.username);
+            
+            // 2. Turn Indicator
             const turnPlayer = state.players[state.turn];
-            const isMyTurn = (me && me.id === turnPlayer.id && !state.processing);
+            const isMyTurn = (me && me.id === turnPlayer.id && !state.processing); // Lock inputs if processing
             const ind = document.getElementById('turn-indicator');
             
-            if(turnPlayer.isStunned) { ind.innerText = `>> ${turnPlayer.name.toUpperCase()} IS STUNNED (SKIP)`; ind.style.color = '#888'; } 
-            else { ind.innerText = isMyTurn ? ">> YOUR TURN" : `>> ${turnPlayer.name.toUpperCase()}'S TURN`; ind.style.color = turnPlayer.color; }
+            if(turnPlayer.isStunned) {
+                 ind.innerText = `>> ${turnPlayer.name.toUpperCase()} IS STUNNED (SKIP)`;
+                 ind.style.color = '#888';
+            } else {
+                 ind.innerText = isMyTurn ? ">> YOUR TURN" : `>> ${turnPlayer.name.toUpperCase()}'S TURN`;
+                 ind.style.color = turnPlayer.color;
+            }
 
-            // *** UPDATED POWERUP LOGIC: BANNED AGAINST GATES/MONARCH ***
+            // 3. Power Up UI (STRICT BATTLE PARTICIPANT CHECK)
             const pBtn = document.getElementById('btn-powerup');
+            
+            // Check if player exists, is alive, has a powerup, and the game is in "Battle Phase"
             if (me && me.alive && me.powerUp && state.processing && state.currentBattle) {
+                // Check if I am the attacker OR the defender
                 const isFighter = (me.id === state.currentBattle.attacker || me.id === state.currentBattle.defender);
                 // Strict PvP Check: Defender must NOT be 'gate'
                 const isPvP = state.currentBattle.defender !== 'gate'; 
@@ -488,52 +574,98 @@
                      pBtn.style.display = 'block';
                      pBtn.innerText = `ACTIVATE ${me.powerUp}`;
                      currentHunterPowerUp = me.powerUp; 
-                } else { pBtn.style.display = 'none'; }
-            } else { pBtn.style.display = 'none'; }
+                } else {
+                     pBtn.style.display = 'none';
+                }
+            } else {
+                pBtn.style.display = 'none';
+            }
 
-            document.getElementById('ingame-party').innerHTML = state.players.map(p => `
+            // 4. Render Party (Left HUD)
+            document.getElementById('ingame-party').innerHTML = state.players.map(p => {
+                const manaDisplay = (p.id === socket.id || (myHunter && myHunter.isAdmin)) ? p.mana : p.displayRank;
+                const stunIcon = p.isStunned ? '😵' : '';
+                return `
                 <div style="padding: 5px; border-bottom: 1px solid #333; margin-bottom:5px; opacity:${p.alive?1:0.3};">
-                    <div style="color:${p.color}; font-weight:900;">${p.isAdmin?'👑':''}${p.name} ${p.isStunned?'😵':''} ${p.powerUp ? POWER_ICONS[p.powerUp]||'⭐' : ''}</div>
+                    <div style="color:${p.color}; font-weight:900;">${p.isAdmin?'👑':''}${p.name} ${stunIcon} ${p.powerUp ? POWER_ICONS[p.powerUp]||'⭐' : ''}</div>
                     <div style="display:flex; justify-content:space-between; font-size:0.8rem;">
                         <span>${p.worldRankLabel || ''}</span>
-                        <span style="color:var(--sys-blue)">MP: ${(p.id===socket.id||(myHunter&&myHunter.isAdmin))?p.mana:p.displayRank}</span>
+                        <span style="color:var(--sys-blue)">MP: ${manaDisplay}</span>
                     </div>
-                </div>`).join('');
+                </div>`;
+            }).join('');
 
-            const board = document.getElementById('game-board'); board.innerHTML = '';
+            // 5. Render Board
+            const board = document.getElementById('game-board');
+            board.innerHTML = '';
+            
+            // Calculate Movement Range
             const range = (isMyTurn && me) ? getMoveRange(me.mana) : 0;
 
             for(let y=0; y<15; y++) {
                 for(let x=0; x<15; x++) {
-                    const cell = document.createElement('div'); cell.className = 'cell';
+                    const cell = document.createElement('div');
+                    cell.className = 'cell';
                     const key = `${x}-${y}`;
+                    
+                    // A. Render Gate
                     if (state.world[key]) {
                         cell.style.backgroundColor = state.world[key].color;
-                        if(state.world[key].rank === 'Silver') cell.classList.add('silver-monarch');
+                        if(state.world[key].rank === 'Silver') {
+                            cell.classList.add('silver-monarch');
+                        }
                     }
+
+                    // B. Render Player
                     const pAtCell = state.players.find(p => p.alive && p.x === x && p.y === y);
                     if (pAtCell) {
                          const stunStyle = pAtCell.isStunned ? 'opacity:0.5; filter:grayscale(100%);' : '';
-                         cell.innerHTML = `<div class="humanoid" style="${stunStyle}"><div class="name-tag" style="color:${pAtCell.color}">${pAtCell.isAdmin?'👑':''}${pAtCell.name}</div><div class="h-head" style="border-color:${pAtCell.color};"></div><div class="h-body" style="border-color:${pAtCell.color};"></div></div>`;
+                         cell.innerHTML = `
+                            <div class="humanoid" style="${stunStyle}">
+                                <div class="name-tag" style="color:${pAtCell.color}">${pAtCell.isAdmin?'👑':''}${pAtCell.name}</div>
+                                <div class="h-head" style="border-color:${pAtCell.color}; box-shadow:0 0 5px ${pAtCell.color};"></div>
+                                <div class="h-body" style="border-color:${pAtCell.color}; box-shadow:0 0 5px ${pAtCell.color};"></div>
+                            </div>`;
                     }
+
+                    // C. Render Valid Move (Only if My Turn + Alive + Not Processing + In Range + Not Stunned)
                     if (isMyTurn && me && me.alive && !me.isStunned) {
-                         const dx = Math.abs(me.x - x); const dy = Math.abs(me.y - y);
+                         const dx = Math.abs(me.x - x);
+                         const dy = Math.abs(me.y - y);
                          let isValid = false;
-                         if (dx === 0 && dy === 0) isValid = false;
-                         else if (dx > 0 && dy > 0) isValid = (dx === 1 && dy === 1);
-                         else isValid = ((dx + dy) <= range);
-                         
-                         if (isValid) { cell.classList.add('valid-move'); cell.onclick = () => socket.emit('playerAction', { tx: x, ty: y }); }
+
+                         if (dx === 0 && dy === 0) {
+                             isValid = false; // Self
+                         } else if (dx === 0 || dy === 0) {
+                             // Cardinal: Check Rank Range
+                             if ((dx + dy) <= range) isValid = true;
+                         } else {
+                             // Diagonal: Strictly 1 tile
+                             if (dx === 1 && dy === 1) isValid = true;
+                         }
+
+                         if (isValid) {
+                             cell.classList.add('valid-move');
+                             cell.onclick = () => socket.emit('playerAction', { tx: x, ty: y });
+                         }
                     }
                     board.appendChild(cell);
                 }
             }
         });
 
+        // --- BATTLE & EVENTS ---
         socket.on('battleStart', (data) => {
-            const panel = document.getElementById('vs-panel'); panel.style.display = 'flex';
-            document.getElementById('vs-content').innerHTML = `<span style="color:${data.hunterColor}; font-weight:900;">${data.hunter}</span><br><span style="font-size:0.8rem; color:#666;">VS</span><br><span style="color:${data.targetColor}; font-weight:900;">${data.target}</span><div style="font-size:0.8rem; color:#aaa; margin-top:5px;">${data.targetRank}</div>`;
-            const bar = document.getElementById('vs-bar'); bar.style.transition = 'none'; bar.style.width = '0%';
+            const panel = document.getElementById('vs-panel');
+            panel.style.display = 'flex';
+            document.getElementById('vs-content').innerHTML = `
+                <span style="color:${data.hunterColor}; font-weight:900;">${data.hunter}</span>
+                <br><span style="font-size:0.8rem; color:#666;">VS</span><br>
+                <span style="color:${data.targetColor}; font-weight:900;">${data.target}</span>
+                <div style="font-size:0.8rem; color:#aaa; margin-top:5px;">${data.targetRank}</div>`;
+            const bar = document.getElementById('vs-bar');
+            bar.style.transition = 'none';
+            bar.style.width = '0%';
             setTimeout(() => { bar.style.transition = 'width 4.8s linear'; bar.style.width = '100%'; }, 50);
         });
 
@@ -556,18 +688,44 @@
         });
 
         socket.on('victoryEvent', (data) => {
-            const scr = document.getElementById('victory-screen'); scr.style.display = 'flex';
+            const scr = document.getElementById('victory-screen');
+            scr.style.display = 'flex';
             document.getElementById('winner-name').innerText = data.winner;
+            
             const isMe = (myHunter && myHunter.username === data.winner);
+            const info = document.getElementById('reward-info');
+            
+            // Determine rewards based on Online vs Offline (AI)
             const isOnline = currentGameState ? currentGameState.isOnline : false;
-            document.getElementById('reward-info').innerText = isMe ? `REWARD: +${isOnline?20:5} HUNTER POINTS` : `MISSION ENDED`;
-            document.getElementById('reward-info').style.color = isMe ? 'var(--rank-e)' : '#888';
+
+            if (isMe) { 
+                info.innerText = `REWARD: +${isOnline?20:5} HUNTER POINTS`; 
+                info.style.color = 'var(--rank-e)'; 
+            } else { 
+                info.innerText = `MISSION ENDED`; 
+                info.style.color = '#888'; 
+            }
         });
 
         socket.on('sysLog', (msg) => alert(`ADMIN: ${msg}`));
 
-        function getShortRankLabel(m) { if(m >= 901) return "S-RANK"; if(m >= 701) return "A-RANK"; if(m >= 501) return "B-RANK"; if(m >= 301) return "C-RANK"; if(m >= 101) return "D-RANK"; return "E-RANK"; }
-        function getMoveRange(mana) { if (mana >= 901) return 6; if (mana >= 701) return 5; if (mana >= 501) return 4; if (mana >= 301) return 3; if (mana >= 101) return 2; return 1; }
+        function getShortRankLabel(m) {
+            if(m >= 901) return "S-RANK";
+            if(m >= 701) return "A-RANK";
+            if(m >= 501) return "B-RANK";
+            if(m >= 301) return "C-RANK";
+            if(m >= 101) return "D-RANK";
+            return "E-RANK";
+        }
+        
+        function getMoveRange(mana) {
+            if (mana >= 901) return 6; // S
+            if (mana >= 701) return 5; // A
+            if (mana >= 501) return 4; // B
+            if (mana >= 301) return 3; // C
+            if (mana >= 101) return 2; // D
+            return 1; // E
+        }
     </script>
 </body>
 </html>
