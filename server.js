@@ -365,42 +365,107 @@ function resolveBattle(room, attacker, defender, isGate) {
     attacker.turnsWithoutBattle = 0;
     if(!isGate) defender.turnsWithoutBattle = 0;
 
-    let attMana = attacker.mana;
-    let defMana = defender.mana;
+    // --- NETHER SWAP LOGIC START ---
+    let actualAttacker = attacker;
+    let actualDefender = defender;
+    let swapOccurred = false;
+
+    // Check if either attacker or defender activated Nether Swap
+    if (attacker.activeBuff === 'NETHER SWAP' || (!isGate && defender.activeBuff === 'NETHER SWAP')) {
+        const swapper = (attacker.activeBuff === 'NETHER SWAP') ? attacker : defender;
+        const opponent = (swapper === attacker) ? defender : attacker;
+
+        // Find a random third player who is alive, not the attacker, and not the defender
+        const candidates = room.players.filter(p => p.alive && p.id !== attacker.id && p.id !== defender.id);
+        
+        if (candidates.length > 0) {
+            const thirdParty = candidates[Math.floor(Math.random() * candidates.length)];
+            
+            // Perform the swap logic
+            io.to(room.id).emit('announcement', `${swapper.name} used NETHER SWAP! ${thirdParty.name} is forced into battle!`);
+            
+            // Set the new combatants for calculation
+            if (swapper === attacker) {
+                actualAttacker = thirdParty; // Third party becomes the new attacker
+                actualDefender = defender;   // Defender stays same
+            } else {
+                actualAttacker = attacker;   // Attacker stays same
+                actualDefender = thirdParty; // Third party becomes the new defender
+            }
+            
+            swapOccurred = true;
+            
+            // Clear the buffer from the original user so they don't use it again immediately
+            swapper.activeBuff = null; 
+            
+            // NOTE: The original user (swapper) is now essentially spectating the outcome
+            // They will receive the loser's MP and position AFTER the battle resolves below.
+        } else {
+             io.to(room.id).emit('announcement', `${swapper.name} tried NETHER SWAP but no targets found!`);
+        }
+    }
+    // --- NETHER SWAP LOGIC END ---
+
+    let attMana = actualAttacker.mana;
+    let defMana = actualDefender.mana;
     let cancel = false;
     let autoWin = false;
 
-    if (attacker.activeBuff === 'DOUBLE DAMAGE') attMana *= 2;
-    if (attacker.activeBuff === 'RULERS AUTHORITY' && (!isGate || defender.rank !== 'Silver')) autoWin = true;
-    if (attacker.activeBuff === 'GHOST WALK') { cancel = true; teleport(attacker); }
+    // Standard Buff Logic (Applied to actual combatants)
+    if (actualAttacker.activeBuff === 'DOUBLE DAMAGE') attMana *= 2;
+    if (actualAttacker.activeBuff === 'RULERS AUTHORITY' && (!isGate || actualDefender.rank !== 'Silver')) autoWin = true;
+    if (actualAttacker.activeBuff === 'GHOST WALK') { cancel = true; teleport(actualAttacker); }
     
     if(!isGate) {
-        if(defender.activeBuff === 'DOUBLE DAMAGE') defMana *= 2;
-        if(defender.activeBuff === 'RULERS AUTHORITY') defMana = 99999999;
-        if(defender.activeBuff === 'GHOST WALK') { cancel = true; teleport(defender); }
+        if(actualDefender.activeBuff === 'DOUBLE DAMAGE') defMana *= 2;
+        if(actualDefender.activeBuff === 'RULERS AUTHORITY') defMana = 99999999;
+        if(actualDefender.activeBuff === 'GHOST WALK') { cancel = true; teleport(actualDefender); }
     }
     
-    attacker.activeBuff = null; 
-    if(!isGate) defender.activeBuff = null;
+    actualAttacker.activeBuff = null; 
+    if(!isGate) actualDefender.activeBuff = null;
 
     if(!cancel) {
+        let loser = null;
+        
         if(autoWin || attMana >= defMana) {
-            attacker.mana += defender.mana;
+            // Attacker Wins
+            actualAttacker.mana += actualDefender.mana;
             if(isGate) {
-                delete room.world[`${attacker.x}-${attacker.y}`];
-                if(defender.rank === 'Silver') return handleWin(room, attacker.name);
-                if(!attacker.powerUp && Math.random() < 0.2) {
-                    attacker.powerUp = POWER_UPS[Math.floor(Math.random() * POWER_UPS.length)];
-                    io.to(attacker.id).emit('announcement', `OBTAINED RUNE: ${attacker.powerUp}`);
+                delete room.world[`${actualAttacker.x}-${actualAttacker.y}`];
+                if(actualDefender.rank === 'Silver') return handleWin(room, actualAttacker.name);
+                if(!actualAttacker.powerUp && Math.random() < 0.2) {
+                    actualAttacker.powerUp = POWER_UPS[Math.floor(Math.random() * POWER_UPS.length)];
+                    io.to(actualAttacker.id).emit('announcement', `OBTAINED RUNE: ${actualAttacker.powerUp}`);
                 }
             } else {
-                defender.alive = false;
+                actualDefender.alive = false;
+                loser = actualDefender;
                 // REMOVED: Immediate -1 penalty on death.
             }
         } else {
-            if(!isGate) defender.mana += attacker.mana;
-            attacker.alive = false;
+            // Defender Wins (Attacker Dies)
+            if(!isGate) actualDefender.mana += actualAttacker.mana;
+            actualAttacker.alive = false;
+            loser = actualAttacker;
             // REMOVED: Immediate -1 penalty on death.
+        }
+
+        // --- NETHER SWAP REWARD DISTRIBUTION ---
+        if (swapOccurred && loser) {
+            // Identify the original user of the swap
+            // We know it was either the original attacker or original defender 
+            // (whichever is NOT in the final battle pair of actualAttacker/actualDefender)
+            const originalUser = (attacker !== actualAttacker && attacker !== actualDefender) ? attacker : defender;
+            
+            // 1. Award Loser's MP to User
+            originalUser.mana += loser.mana;
+            
+            // 2. Teleport User to Loser's Block
+            originalUser.x = loser.x;
+            originalUser.y = loser.y;
+            
+            io.to(room.id).emit('announcement', `${originalUser.name} absorbs ${loser.name}'s MP and takes their place!`);
         }
     }
 
