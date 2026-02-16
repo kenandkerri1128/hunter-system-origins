@@ -45,6 +45,8 @@ async function dbUpdateHunter(username, points, isWin) {
     try {
         const { data: u } = await supabase.from('Hunters').select('hunterpoints, wins, losses').eq('username', username).maybeSingle();
         if(u) {
+            // Updated to allow negative points if logic demands, but usually we floor at 0. 
+            // Since you want penalties, we allow subtraction.
             const updates = { hunterpoints: Math.max(0, u.hunterpoints + points) };
             if(isWin === true) updates.wins = (u.wins || 0) + 1;
             else if(isWin === false) updates.losses = (u.losses || 0) + 1;
@@ -132,6 +134,7 @@ function syncAllGates() {
 // --- SOCKET LOGIC ---
 io.on('connection', (socket) => {
     
+    // 1. ADMIN ACTIONS
     socket.on('adminAction', (data) => {
         if (socket.id !== adminSocketId) return; 
         if (data.action === 'kick' && connectedUsers[data.target]) {
@@ -145,6 +148,7 @@ io.on('connection', (socket) => {
         }
     });
 
+    // 2. AUTHENTICATION
     socket.on('authRequest', async (data) => {
         if (connectedUsers[data.u]) {
             const old = io.sockets.sockets.get(connectedUsers[data.u]);
@@ -283,6 +287,7 @@ io.on('connection', (socket) => {
         startGame(rooms[id]);
     });
 
+    // 5. IN-GAME ACTIONS
     socket.on('activateSkill', (data) => {
         const r = Object.values(rooms).find(rm => rm.players.some(p => p.id === socket.id));
         if(r && r.processing) {
@@ -362,41 +367,78 @@ function resolveBattle(room, attacker, defender, isGate) {
     attacker.turnsWithoutBattle = 0;
     if(!isGate) defender.turnsWithoutBattle = 0;
 
-    let attMana = attacker.mana;
-    let defMana = defender.mana;
+    // --- NETHER SWAP LOGIC ---
+    let battleAttacker = attacker;
+    let battleDefender = defender;
+    let swapper = null;
+
+    if (attacker.activeBuff === 'NETHER SWAP') swapper = attacker;
+    else if (!isGate && defender.activeBuff === 'NETHER SWAP') swapper = defender;
+
+    if (swapper) {
+        const victims = room.players.filter(p => p.alive && !p.quit && p.id !== attacker.id && p.id !== defender.id);
+        if (victims.length > 0) {
+            const victim = victims[Math.floor(Math.random() * victims.length)];
+            io.to(room.id).emit('announcement', `${swapper.name} used NETHER SWAP! Swapping with ${victim.name}!`);
+            if (swapper.id === attacker.id) battleAttacker = victim;
+            else battleDefender = victim;
+            swapper.activeBuff = null;
+        } else {
+            io.to(room.id).emit('announcement', `${swapper.name}'s NETHER SWAP failed! No targets.`);
+            swapper = null; 
+            attacker.activeBuff = null; 
+            if(!isGate) defender.activeBuff = null;
+        }
+    }
+
+    let attMana = battleAttacker.mana;
+    let defMana = battleDefender.mana;
     let cancel = false;
     let autoWin = false;
 
-    if (attacker.activeBuff === 'DOUBLE DAMAGE') attMana *= 2;
-    if (attacker.activeBuff === 'RULERS AUTHORITY' && (!isGate || defender.rank !== 'Silver')) autoWin = true;
-    if (attacker.activeBuff === 'GHOST WALK') { cancel = true; teleport(attacker); }
+    if (battleAttacker.activeBuff === 'DOUBLE DAMAGE') attMana *= 2;
+    if (battleAttacker.activeBuff === 'RULERS AUTHORITY' && (!isGate || battleDefender.rank !== 'Silver')) autoWin = true;
+    if (battleAttacker.activeBuff === 'GHOST WALK') { cancel = true; teleport(battleAttacker); }
     
     if(!isGate) {
-        if(defender.activeBuff === 'DOUBLE DAMAGE') defMana *= 2;
-        if(defender.activeBuff === 'RULERS AUTHORITY') defMana = 99999999;
-        if(defender.activeBuff === 'GHOST WALK') { cancel = true; teleport(defender); }
+        if(battleDefender.activeBuff === 'DOUBLE DAMAGE') defMana *= 2;
+        if(battleDefender.activeBuff === 'RULERS AUTHORITY') defMana = 99999999;
+        if(battleDefender.activeBuff === 'GHOST WALK') { cancel = true; teleport(battleDefender); }
     }
     
-    attacker.activeBuff = null; 
-    if(!isGate) defender.activeBuff = null;
+    if(battleAttacker.id !== (swapper?.id)) battleAttacker.activeBuff = null;
+    if(!isGate && battleDefender.id !== (swapper?.id)) battleDefender.activeBuff = null;
+
+    let loser = null;
 
     if(!cancel) {
         if(autoWin || attMana >= defMana) {
-            attacker.mana += defender.mana;
+            battleAttacker.mana += battleDefender.mana;
             if(isGate) {
                 delete room.world[`${attacker.x}-${attacker.y}`];
-                if(defender.rank === 'Silver') return handleWin(room, attacker.name);
-                if(!attacker.powerUp && Math.random() < 0.2) {
-                    attacker.powerUp = POWER_UPS[Math.floor(Math.random() * POWER_UPS.length)];
-                    io.to(attacker.id).emit('announcement', `OBTAINED RUNE: ${attacker.powerUp}`);
+                if(battleDefender.rank === 'Silver') return handleWin(room, battleAttacker.name);
+                if(!battleAttacker.powerUp && Math.random() < 0.2) {
+                    battleAttacker.powerUp = POWER_UPS[Math.floor(Math.random() * POWER_UPS.length)];
+                    io.to(battleAttacker.id).emit('announcement', `OBTAINED RUNE: ${battleAttacker.powerUp}`);
                 }
             } else {
-                defender.alive = false;
+                battleDefender.alive = false;
+                loser = battleDefender;
+                // NO PENALTY HERE (Ingame Death)
             }
         } else {
-            if(!isGate) defender.mana += attacker.mana;
-            attacker.alive = false;
+            if(!isGate) battleDefender.mana += battleAttacker.mana;
+            battleAttacker.alive = false;
+            loser = battleAttacker;
+            // NO PENALTY HERE (Ingame Death)
         }
+    }
+
+    if (swapper && loser) {
+        io.to(room.id).emit('announcement', `${swapper.name} reaps MP and positions from ${loser.name}!`);
+        swapper.mana += loser.mana; 
+        swapper.x = loser.x;        
+        swapper.y = loser.y;
     }
 
     io.to(room.id).emit('battleEnd');
@@ -457,7 +499,6 @@ function finishTurn(room) {
     do {
         room.turn = (room.turn + 1) % room.players.length;
         const nextP = room.players[room.turn];
-        
         if (nextP.alive && !nextP.quit) {
             if (nextP.isStunned) {
                  nextP.isStunned = false; 
@@ -479,8 +520,17 @@ function finishTurn(room) {
 function handleWin(room, winnerName) {
     io.to(room.id).emit('victoryEvent', { winner: winnerName });
     room.active = false;
+    
+    // WINNER
     dbUpdateHunter(winnerName, room.isOnline ? 20 : 5, true);
-    if(room.isOnline) room.players.forEach(p => { if(p.name !== winnerName && !p.quit && !p.isAI) dbUpdateHunter(p.name, -5, false); });
+    
+    // LOSERS (Game Loss = -1 Penalty)
+    room.players.forEach(p => { 
+        if(p.name !== winnerName && !p.quit && !p.isAI) {
+            dbUpdateHunter(p.name, -1, false); 
+        }
+    });
+
     broadcastWorldRankings();
     setTimeout(() => { io.to(room.id).emit('returnToProfile'); delete rooms[room.id]; syncAllGates(); }, 6000);
 }
@@ -504,7 +554,9 @@ function handleDisconnect(socket, isQuit) {
         const p = room.players.find(pl => pl.id === socket.id);
         if(isQuit) {
             p.quit = true; p.alive = false; 
-            dbUpdateHunter(p.name, room.isOnline ? -20 : -1, false);
+            // QUIT = GAME LOSS = -1 Penalty
+            dbUpdateHunter(p.name, -1, false);
+            
             socket.leave(room.id);
             socket.emit('returnToProfile'); 
             const activeHumans = room.players.filter(pl => !pl.quit && !pl.isAI);
@@ -533,7 +585,6 @@ function triggerRespawn(room, survivorId) {
             p.turnsWithoutBattle = 0;
             p.isStunned = false;
             teleport(p);
-            // Reward everyone (except winner if any, though survivorId logic implies winner)
             if (!survivorId || p.id !== survivorId) {
                  p.mana += Math.floor(Math.random() * 1001) + 500;
             }
@@ -560,7 +611,7 @@ function runAIMove(room, ai) {
     let minDist = 999;
     const range = getMoveRange(ai.mana);
 
-    // 1. PRIORITY: If AI is LAST MAN STANDING, target Silver Monarch
+    // 1. MONARCH PRIORITY
     const alivePlayers = room.players.filter(p => p.alive);
     if(alivePlayers.length === 1 && alivePlayers[0].id === ai.id) {
         const silverKey = Object.keys(room.world).find(k => room.world[k].rank === 'Silver');
@@ -570,11 +621,10 @@ function runAIMove(room, ai) {
         }
     }
 
-    // 2. PRIORITY: Target Killable Players
+    // 2. KILLABLE PLAYER PRIORITY
     if(!target) {
         const killable = room.players.filter(p => p.id !== ai.id && p.alive && ai.mana >= p.mana);
         if(killable.length > 0) {
-             // Find closest killable
              for(const k of killable) {
                  const dist = Math.abs(ai.x - k.x) + Math.abs(ai.y - k.y);
                  if(dist < minDist) { minDist = dist; target = {x: k.x, y: k.y}; }
@@ -582,7 +632,7 @@ function runAIMove(room, ai) {
         }
     }
 
-    // 3. PRIORITY: Farm Gate (if no players to kill)
+    // 3. FARM GATE PRIORITY
     if (!target) {
         minDist = 999;
         for(const key in room.world) {
