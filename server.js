@@ -132,7 +132,6 @@ function syncAllGates() {
 // --- SOCKET LOGIC ---
 io.on('connection', (socket) => {
     
-    // 1. ADMIN ACTIONS
     socket.on('adminAction', (data) => {
         if (socket.id !== adminSocketId) return; 
         if (data.action === 'kick' && connectedUsers[data.target]) {
@@ -146,7 +145,6 @@ io.on('connection', (socket) => {
         }
     });
 
-    // 2. AUTHENTICATION
     socket.on('authRequest', async (data) => {
         if (connectedUsers[data.u]) {
             const old = io.sockets.sockets.get(connectedUsers[data.u]);
@@ -285,7 +283,6 @@ io.on('connection', (socket) => {
         startGame(rooms[id]);
     });
 
-    // 5. IN-GAME ACTIONS
     socket.on('activateSkill', (data) => {
         const r = Object.values(rooms).find(rm => rm.players.some(p => p.id === socket.id));
         if(r && r.processing) {
@@ -365,96 +362,41 @@ function resolveBattle(room, attacker, defender, isGate) {
     attacker.turnsWithoutBattle = 0;
     if(!isGate) defender.turnsWithoutBattle = 0;
 
-    // --- NETHER SWAP LOGIC ---
-    let battleAttacker = attacker;
-    let battleDefender = defender;
-    let swapper = null;
-
-    // Check if Nether Swap is active
-    if (attacker.activeBuff === 'NETHER SWAP') swapper = attacker;
-    else if (!isGate && defender.activeBuff === 'NETHER SWAP') swapper = defender;
-
-    if (swapper) {
-        // Find possible victims (Alive, Not in Battle)
-        const victims = room.players.filter(p => p.alive && !p.quit && p.id !== attacker.id && p.id !== defender.id);
-
-        if (victims.length > 0) {
-            // Pick a random victim
-            const victim = victims[Math.floor(Math.random() * victims.length)];
-            io.to(room.id).emit('announcement', `${swapper.name} used NETHER SWAP! Swapping with ${victim.name}!`);
-
-            // Substitute the player in the battle
-            if (swapper.id === attacker.id) {
-                battleAttacker = victim;
-            } else {
-                battleDefender = victim;
-            }
-            
-            // Swapper consumes buff
-            swapper.activeBuff = null;
-        } else {
-            // FAIL SAFE: No targets available (only 2 players left)
-            io.to(room.id).emit('announcement', `${swapper.name}'s NETHER SWAP failed! No targets available.`);
-            swapper = null; // Revert to normal battle logic
-            attacker.activeBuff = null; // Consume buff to prevent loops
-            if(!isGate) defender.activeBuff = null;
-        }
-    }
-
-    // --- STANDARD BATTLE LOGIC (Using battleAttacker/battleDefender) ---
-    let attMana = battleAttacker.mana;
-    let defMana = battleDefender.mana;
+    let attMana = attacker.mana;
+    let defMana = defender.mana;
     let cancel = false;
     let autoWin = false;
 
-    // Check Buffs for ACTUAL combatants (The Victim, if swapped)
-    if (battleAttacker.activeBuff === 'DOUBLE DAMAGE') attMana *= 2;
-    if (battleAttacker.activeBuff === 'RULERS AUTHORITY' && (!isGate || battleDefender.rank !== 'Silver')) autoWin = true;
-    if (battleAttacker.activeBuff === 'GHOST WALK') { cancel = true; teleport(battleAttacker); }
+    if (attacker.activeBuff === 'DOUBLE DAMAGE') attMana *= 2;
+    if (attacker.activeBuff === 'RULERS AUTHORITY' && (!isGate || defender.rank !== 'Silver')) autoWin = true;
+    if (attacker.activeBuff === 'GHOST WALK') { cancel = true; teleport(attacker); }
     
     if(!isGate) {
-        if(battleDefender.activeBuff === 'DOUBLE DAMAGE') defMana *= 2;
-        if(battleDefender.activeBuff === 'RULERS AUTHORITY') defMana = 99999999;
-        if(battleDefender.activeBuff === 'GHOST WALK') { cancel = true; teleport(battleDefender); }
+        if(defender.activeBuff === 'DOUBLE DAMAGE') defMana *= 2;
+        if(defender.activeBuff === 'RULERS AUTHORITY') defMana = 99999999;
+        if(defender.activeBuff === 'GHOST WALK') { cancel = true; teleport(defender); }
     }
     
-    // Clear buffs for combatants (Swapper cleared above)
-    if(battleAttacker.id !== (swapper?.id)) battleAttacker.activeBuff = null;
-    if(!isGate && battleDefender.id !== (swapper?.id)) battleDefender.activeBuff = null;
-
-    let loser = null;
+    attacker.activeBuff = null; 
+    if(!isGate) defender.activeBuff = null;
 
     if(!cancel) {
         if(autoWin || attMana >= defMana) {
-            // Attacker Wins
-            battleAttacker.mana += battleDefender.mana;
+            attacker.mana += defender.mana;
             if(isGate) {
-                delete room.world[`${attacker.x}-${attacker.y}`]; // Use original coords for gate removal
-                if(battleDefender.rank === 'Silver') return handleWin(room, battleAttacker.name);
-                
-                if(!battleAttacker.powerUp && Math.random() < 0.2) {
-                    battleAttacker.powerUp = POWER_UPS[Math.floor(Math.random() * POWER_UPS.length)];
-                    io.to(battleAttacker.id).emit('announcement', `OBTAINED RUNE: ${battleAttacker.powerUp}`);
+                delete room.world[`${attacker.x}-${attacker.y}`];
+                if(defender.rank === 'Silver') return handleWin(room, attacker.name);
+                if(!attacker.powerUp && Math.random() < 0.2) {
+                    attacker.powerUp = POWER_UPS[Math.floor(Math.random() * POWER_UPS.length)];
+                    io.to(attacker.id).emit('announcement', `OBTAINED RUNE: ${attacker.powerUp}`);
                 }
             } else {
-                // Defender Loses
-                battleDefender.alive = false;
-                loser = battleDefender;
+                defender.alive = false;
             }
         } else {
-            // Defender Wins
-            if(!isGate) battleDefender.mana += battleAttacker.mana;
-            battleAttacker.alive = false;
-            loser = battleAttacker;
+            if(!isGate) defender.mana += attacker.mana;
+            attacker.alive = false;
         }
-    }
-
-    // --- NETHER SWAP REWARD EXECUTION ---
-    if (swapper && loser) {
-        io.to(room.id).emit('announcement', `${swapper.name} reaps the MP of ${loser.name} and teleports!`);
-        swapper.mana += loser.mana; // Award MP
-        swapper.x = loser.x;        // Teleport to loser's block
-        swapper.y = loser.y;
     }
 
     io.to(room.id).emit('battleEnd');
@@ -482,7 +424,15 @@ function finishTurn(room) {
     if(!room.active) return;
     room.processing = false; 
     const justPlayed = room.players[room.turn];
-    if(justPlayed && justPlayed.alive) justPlayed.turnsWithoutBattle++;
+    
+    // --- STUNNED MECHANIC ---
+    if(justPlayed && justPlayed.alive) {
+        justPlayed.turnsWithoutBattle++;
+        if (justPlayed.turnsWithoutBattle >= 5 && !justPlayed.isStunned) {
+            justPlayed.isStunned = true;
+            io.to(room.id).emit('announcement', `${justPlayed.name} is EXHAUSTED and STUNNED!`);
+        }
+    }
 
     room.currentRoundMoves++;
     const activeList = room.players.filter(p => p.alive);
@@ -507,7 +457,16 @@ function finishTurn(room) {
     do {
         room.turn = (room.turn + 1) % room.players.length;
         const nextP = room.players[room.turn];
-        if (nextP.alive && !nextP.quit) validNext = true;
+        
+        if (nextP.alive && !nextP.quit) {
+            if (nextP.isStunned) {
+                 nextP.isStunned = false; 
+                 nextP.turnsWithoutBattle = 0; 
+                 io.to(room.id).emit('announcement', `${nextP.name} recovers from STUN.`);
+            } else {
+                 validNext = true;
+            }
+        }
         attempts++;
     } while(!validNext && attempts < 10);
 
@@ -574,8 +533,7 @@ function triggerRespawn(room, survivorId) {
             p.turnsWithoutBattle = 0;
             p.isStunned = false;
             teleport(p);
-            
-            // *** FIX: BONUS MP FOR ALL DEAD (EXCEPT WINNER IF EXISTS) ***
+            // Reward everyone (except winner if any, though survivorId logic implies winner)
             if (!survivorId || p.id !== survivorId) {
                  p.mana += Math.floor(Math.random() * 1001) + 500;
             }
@@ -597,12 +555,43 @@ function spawnGate(room) {
 
 function runAIMove(room, ai) {
     if(!room.active) return;
-    let target = null; let minDist = 999; const range = getMoveRange(ai.mana);
-    for(const key in room.world) {
-        const [gx, gy] = key.split('-').map(Number);
-        const dist = Math.abs(ai.x - gx) + Math.abs(ai.y - gy);
-        if(ai.mana >= room.world[key].mana && dist < minDist) { minDist = dist; target = {x:gx, y:gy}; }
+    
+    let target = null;
+    let minDist = 999;
+    const range = getMoveRange(ai.mana);
+
+    // 1. PRIORITY: If AI is LAST MAN STANDING, target Silver Monarch
+    const alivePlayers = room.players.filter(p => p.alive);
+    if(alivePlayers.length === 1 && alivePlayers[0].id === ai.id) {
+        const silverKey = Object.keys(room.world).find(k => room.world[k].rank === 'Silver');
+        if(silverKey) {
+             const [sx, sy] = silverKey.split('-').map(Number);
+             target = {x: sx, y: sy};
+        }
     }
+
+    // 2. PRIORITY: Target Killable Players
+    if(!target) {
+        const killable = room.players.filter(p => p.id !== ai.id && p.alive && ai.mana >= p.mana);
+        if(killable.length > 0) {
+             // Find closest killable
+             for(const k of killable) {
+                 const dist = Math.abs(ai.x - k.x) + Math.abs(ai.y - k.y);
+                 if(dist < minDist) { minDist = dist; target = {x: k.x, y: k.y}; }
+             }
+        }
+    }
+
+    // 3. PRIORITY: Farm Gate (if no players to kill)
+    if (!target) {
+        minDist = 999;
+        for(const key in room.world) {
+            const [gx, gy] = key.split('-').map(Number);
+            const dist = Math.abs(ai.x - gx) + Math.abs(ai.y - gy);
+            if(ai.mana >= room.world[key].mana && dist < minDist) { minDist = dist; target = {x:gx, y:gy}; }
+        }
+    }
+
     let tx = ai.x, ty = ai.y;
     if(target) {
         const dx = target.x - ai.x; const dy = target.y - ai.y;
@@ -630,7 +619,7 @@ function broadcastGameState(room) {
                 powerUp: (pl.id===p.id || pl.isAdmin) ? pl.powerUp : null,
                 displayRank: getDisplayRank(pl.mana)
             }));
-            socket.emit('gameStateUpdate', { ...room, players: sanitized, currentBattle: room.currentBattle }); // Send battle info
+            socket.emit('gameStateUpdate', { ...room, players: sanitized, currentBattle: room.currentBattle }); 
         }
     });
 }
