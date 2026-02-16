@@ -132,6 +132,7 @@ function syncAllGates() {
 // --- SOCKET LOGIC ---
 io.on('connection', (socket) => {
     
+    // 1. ADMIN ACTIONS
     socket.on('adminAction', (data) => {
         if (socket.id !== adminSocketId) return; 
         if (data.action === 'kick' && connectedUsers[data.target]) {
@@ -145,6 +146,7 @@ io.on('connection', (socket) => {
         }
     });
 
+    // 2. AUTHENTICATION
     socket.on('authRequest', async (data) => {
         if (connectedUsers[data.u]) {
             const old = io.sockets.sockets.get(connectedUsers[data.u]);
@@ -283,6 +285,7 @@ io.on('connection', (socket) => {
         startGame(rooms[id]);
     });
 
+    // 5. IN-GAME ACTIONS
     socket.on('activateSkill', (data) => {
         const r = Object.values(rooms).find(rm => rm.players.some(p => p.id === socket.id));
         if(r && r.processing) {
@@ -358,7 +361,7 @@ function processMove(room, player, tx, ty) {
 
 function resolveBattle(room, attacker, defender, isGate) {
     if(!room.active) return;
-    room.currentBattle = null; 
+    room.currentBattle = null;
     attacker.turnsWithoutBattle = 0;
     if(!isGate) defender.turnsWithoutBattle = 0;
 
@@ -392,12 +395,12 @@ function resolveBattle(room, attacker, defender, isGate) {
                 }
             } else {
                 defender.alive = false;
-                // *** FIX: REMOVED DB UPDATE ON DEATH (NO LOSS COUNTED) ***
+                if(!room.isOnline) dbUpdateHunter(defender.name, -1, null);
             }
         } else {
             if(!isGate) defender.mana += attacker.mana;
             attacker.alive = false;
-            // *** FIX: REMOVED DB UPDATE ON DEATH (NO LOSS COUNTED) ***
+            if(!room.isOnline) dbUpdateHunter(attacker.name, -1, null);
         }
     }
 
@@ -426,7 +429,15 @@ function finishTurn(room) {
     if(!room.active) return;
     room.processing = false; 
     const justPlayed = room.players[room.turn];
-    if(justPlayed && justPlayed.alive) justPlayed.turnsWithoutBattle++;
+    
+    // *** FIX: STUNNED MECHANIC IMPLEMENTED HERE ***
+    if(justPlayed && justPlayed.alive) {
+        justPlayed.turnsWithoutBattle++;
+        if (justPlayed.turnsWithoutBattle >= 5 && !justPlayed.isStunned) {
+            justPlayed.isStunned = true;
+            io.to(room.id).emit('announcement', `${justPlayed.name} is EXHAUSTED and STUNNED!`);
+        }
+    }
 
     room.currentRoundMoves++;
     const activeList = room.players.filter(p => p.alive);
@@ -451,7 +462,19 @@ function finishTurn(room) {
     do {
         room.turn = (room.turn + 1) % room.players.length;
         const nextP = room.players[room.turn];
-        if (nextP.alive && !nextP.quit) validNext = true;
+        
+        // Skip dead or quit players
+        if (nextP.alive && !nextP.quit) {
+             // Handle Stunned Skip
+             if (nextP.isStunned) {
+                 nextP.isStunned = false; // Unstun for next time
+                 nextP.turnsWithoutBattle = 0; // Reset counter
+                 io.to(room.id).emit('announcement', `${nextP.name} recovers from STUN.`);
+                 // Loop continues to find next valid player
+             } else {
+                 validNext = true;
+             }
+        }
         attempts++;
     } while(!validNext && attempts < 10);
 
@@ -518,8 +541,7 @@ function triggerRespawn(room, survivorId) {
             p.turnsWithoutBattle = 0;
             p.isStunned = false;
             teleport(p);
-            
-            // *** FIX: BONUS MP FOR ALL DEAD (EXCEPT WINNER IF EXISTS) ***
+
             if (!survivorId || p.id !== survivorId) {
                  p.mana += Math.floor(Math.random() * 1001) + 500;
             }
@@ -541,12 +563,31 @@ function spawnGate(room) {
 
 function runAIMove(room, ai) {
     if(!room.active) return;
-    let target = null; let minDist = 999; const range = getMoveRange(ai.mana);
-    for(const key in room.world) {
-        const [gx, gy] = key.split('-').map(Number);
-        const dist = Math.abs(ai.x - gx) + Math.abs(ai.y - gy);
-        if(ai.mana >= room.world[key].mana && dist < minDist) { minDist = dist; target = {x:gx, y:gy}; }
+    
+    // *** FIX: AI PRIORITIZATION (PLAYERS > GATES) ***
+    let target = null;
+    let minDist = 999;
+    const range = getMoveRange(ai.mana);
+
+    // 1. Scan for Killable Players
+    const killableEnemies = room.players.filter(p => p.id !== ai.id && p.alive && ai.mana >= p.mana);
+    if (killableEnemies.length > 0) {
+        killableEnemies.forEach(e => {
+            const dist = Math.abs(ai.x - e.x) + Math.abs(ai.y - e.y);
+            if (dist < minDist) { minDist = dist; target = {x: e.x, y: e.y}; }
+        });
     }
+
+    // 2. If no enemies found, look for Gates
+    if (!target) {
+        minDist = 999;
+        for(const key in room.world) {
+            const [gx, gy] = key.split('-').map(Number);
+            const dist = Math.abs(ai.x - gx) + Math.abs(ai.y - gy);
+            if(ai.mana >= room.world[key].mana && dist < minDist) { minDist = dist; target = {x:gx, y:gy}; }
+        }
+    }
+
     let tx = ai.x, ty = ai.y;
     if(target) {
         const dx = target.x - ai.x; const dy = target.y - ai.y;
@@ -574,7 +615,7 @@ function broadcastGameState(room) {
                 powerUp: (pl.id===p.id || pl.isAdmin) ? pl.powerUp : null,
                 displayRank: getDisplayRank(pl.mana)
             }));
-            socket.emit('gameStateUpdate', { ...room, players: sanitized, currentBattle: room.currentBattle }); // Send battle info
+            socket.emit('gameStateUpdate', { ...room, players: sanitized, currentBattle: room.currentBattle }); 
         }
     });
 }
