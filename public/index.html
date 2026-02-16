@@ -599,19 +599,34 @@
             }, 1500);
         }
 
+        function getRankLetter(hup) {
+            if (hup >= 1000) return { letter: "S+", color: "var(--rank-s)" }; // Custom S+ logic
+            if (hup >= 901) return { letter: "S", color: "var(--rank-s)" };
+            if (hup >= 701) return { letter: "A", color: "var(--rank-a)" };
+            if (hup >= 501) return { letter: "B", color: "var(--rank-b)" };
+            if (hup >= 301) return { letter: "C", color: "var(--rank-c)" };
+            if (hup >= 101) return { letter: "D", color: "var(--rank-d)" };
+            return { letter: "E", color: "var(--rank-e)" };
+        }
+
         function renderRankings() {
             const el = document.getElementById('world-rank-list');
-            el.innerHTML = currentWorldRankings.slice(0, 15).map((u, i) => `
+            el.innerHTML = currentWorldRankings.slice(0, 15).map((u, i) => {
+                const rankData = getRankLetter(u.hunterpoints);
+                return `
                 <div style="padding: 10px; border-bottom: 1px solid #222; display:flex; justify-content:space-between; align-items: center; font-weight:900; font-size:0.9rem;">
-                    <span style="color:${i<3 ? 'var(--sys-gold)' : (i<10 ? 'var(--rank-s)' : '#fff')}">
-                        #${i+1} ${u.username} ${u.isAdmin?'👑':''}
-                    </span>
+                    <div style="display:flex; flex-direction:column;">
+                        <span style="color:${i<3 ? 'var(--sys-gold)' : '#fff'}">
+                            #${i+1} ${u.username} ${u.isAdmin?'👑':''}
+                        </span>
+                        <span style="color:${rankData.color}; font-size:0.75rem; font-weight:900;">${rankData.letter}</span>
+                    </div>
                     <span style="color: #666; font-size: 0.8rem; margin-left: auto; margin-right: 20px;">
                         W: ${u.wins || 0} | L: ${u.losses || 0}
                     </span>
-                    <span style="color:#888; width: 80px; text-align: right;">${u.hunterpoints} HuP</span>
+                    <span style="color:#fff; font-weight:900; font-size:1rem; width: 80px; text-align: right;">${u.hunterpoints} HuP</span>
                 </div>
-            `).join('');
+            `;}).join('');
         }
         socket.on('updateWorldRankings', (l) => { currentWorldRankings = l; renderRankings(); });
 
