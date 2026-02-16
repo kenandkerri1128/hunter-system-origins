@@ -456,7 +456,7 @@ function checkSilverMonarchCondition(room) {
             do { sx=rInt(15); sy=rInt(15); } while(room.players.some(p=>p.x===sx && p.y===sy) || room.world[`${sx}-${sy}`]);
             const smMana = Math.floor(Math.random() * (17000 - 1500 + 1)) + 1500;
             room.world[`${sx}-${sy}`] = { rank: 'Silver', color: '#fff', mana: smMana };
-            io.to(room.id).emit('announcement', `THE MONARCH HAS DESCENDED! DEFEAT IT IN 5 TURNS!`);
+            io.to(room.id).emit('announcement', `THE MONARCH HAS DESCENDED! DEFEAT IT IN 4 TURNS!`);
             room.survivorTurns = 0;
         }
     } 
@@ -676,4 +676,5 @@ function broadcastGameState(room) {
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => console.log(`SYSTEM: ONLINE ON PORT ${PORT}`));
+
 
