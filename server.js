@@ -556,7 +556,7 @@ function handleWin(room, winnerName) {
     dbUpdateHunter(winnerName, room.isOnline ? 20 : 5, true);
     room.players.forEach(p => { 
         if(p.name !== winnerName && !p.quit && !p.isAI) {
-            dbUpdateHunter(p.name, -1, false); 
+            dbUpdateHunter(p.name, -5, false); 
         }
     });
     broadcastWorldRankings();
@@ -694,3 +694,4 @@ function broadcastGameState(room) {
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => console.log(`SYSTEM: ONLINE ON PORT ${PORT}`));
+
