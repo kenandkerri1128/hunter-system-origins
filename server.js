@@ -25,7 +25,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 // GLOBAL STATE
 let rooms = {};
 let connectedUsers = {}; 
-let connectedDevices = {}; // NEW: Track unique devices
+let connectedDevices = {}; // TRACKS DEVICES
 let adminSocketId = null;
 
 // CONSTANTS
@@ -133,22 +133,21 @@ function syncAllGates() {
 // --- SOCKET LOGIC ---
 io.on('connection', (socket) => {
     
-    // --- ONE GAME PER DEVICE (Using Unique Device ID from Client) ---
+    // --- 1. DEVICE LOCK (STRICT) ---
     const deviceId = socket.handshake.query.deviceId;
 
     if (deviceId) {
-        if (connectedDevices[deviceId]) {
-            // Device is already connected -> Block this new connection
-            socket.emit('authError', "SYSTEM: DEVICE ALREADY CONNECTED IN ANOTHER TAB.");
+        // Check if this device ID is already in our list AND if that socket is actually still connected
+        if (connectedDevices[deviceId] && io.sockets.sockets.get(connectedDevices[deviceId])) {
+            socket.emit('authError', "SYSTEM: DEVICE BUSY. CLOSE OTHER TABS.");
             socket.disconnect(true);
             return;
         }
-        // Register this device ID
+        // Register this device
         connectedDevices[deviceId] = socket.id;
     }
-    // ----------------------------------------------------------------
+    // --------------------------------
 
-    // 1. ADMIN ACTIONS
     socket.on('adminAction', (data) => {
         if (socket.id !== adminSocketId) return; 
         if (data.action === 'kick' && connectedUsers[data.target]) {
@@ -162,7 +161,6 @@ io.on('connection', (socket) => {
         }
     });
 
-    // 2. AUTHENTICATION
     socket.on('authRequest', async (data) => {
         if (connectedUsers[data.u]) {
             const old = io.sockets.sockets.get(connectedUsers[data.u]);
@@ -301,7 +299,6 @@ io.on('connection', (socket) => {
         startGame(rooms[id]);
     });
 
-    // 5. IN-GAME ACTIONS
     socket.on('activateSkill', (data) => {
         const r = Object.values(rooms).find(rm => rm.players.some(p => p.id === socket.id));
         if(r && r.processing) {
@@ -338,7 +335,7 @@ io.on('connection', (socket) => {
 
     socket.on('quitGame', () => handleDisconnect(socket, true));
     
-    // --- HANDLE DISCONNECT & CLEANUP DEVICE ID ---
+    // 6. DISCONNECT HANDLER (CLEANUP DEVICE ID)
     socket.on('disconnect', () => {
         if (deviceId && connectedDevices[deviceId] === socket.id) {
             delete connectedDevices[deviceId];
@@ -386,16 +383,13 @@ function resolveBattle(room, attacker, defender, isGate) {
     if(!room.active) return;
     room.currentBattle = null;
     
-    // --- RESET STUN COUNTERS ON BATTLE ---
     attacker.turnsWithoutBattle = 0;
     if(!isGate) {
-        // PvP Battle
         attacker.turnsWithoutPvP = 0;
         defender.turnsWithoutBattle = 0;
         defender.turnsWithoutPvP = 0;
     }
 
-    // --- SOUL SWAP LOGIC ---
     let battleAttacker = attacker;
     let battleDefender = defender;
     let swapper = null;
@@ -493,18 +487,15 @@ function finishTurn(room) {
     room.processing = false; 
     const justPlayed = room.players[room.turn];
     
-    // --- STUNNED MECHANICS (UPDATED) ---
     if(justPlayed && justPlayed.alive) {
         justPlayed.turnsWithoutBattle++;
         justPlayed.turnsWithoutPvP++;
 
-        // 1. General Stun (No Battle in 5 turns) -> Stun for 1 turn
         if (justPlayed.turnsWithoutBattle >= 5 && !justPlayed.isStunned) {
             justPlayed.isStunned = true;
             justPlayed.stunDuration = 1;
             io.to(room.id).emit('announcement', `${justPlayed.name} is EXHAUSTED (No Battle)! STUNNED for 1 Turn!`);
         }
-        // 2. PvP Stun (No PvP in 10 turns) -> Stun for 2 turns
         else if (justPlayed.turnsWithoutPvP >= 10 && !justPlayed.isStunned) {
             justPlayed.isStunned = true;
             justPlayed.stunDuration = 2;
@@ -562,17 +553,12 @@ function finishTurn(room) {
 function handleWin(room, winnerName) {
     io.to(room.id).emit('victoryEvent', { winner: winnerName });
     room.active = false;
-    
-    // WINNER
     dbUpdateHunter(winnerName, room.isOnline ? 20 : 5, true);
-    
-    // LOSERS (Game Loss = -1 Penalty)
     room.players.forEach(p => { 
         if(p.name !== winnerName && !p.quit && !p.isAI) {
             dbUpdateHunter(p.name, -1, false); 
         }
     });
-
     broadcastWorldRankings();
     setTimeout(() => { io.to(room.id).emit('returnToProfile'); delete rooms[room.id]; syncAllGates(); }, 6000);
 }
@@ -596,9 +582,7 @@ function handleDisconnect(socket, isQuit) {
         const p = room.players.find(pl => pl.id === socket.id);
         if(isQuit) {
             p.quit = true; p.alive = false; 
-            // QUIT = GAME LOSS = -1 Penalty
             dbUpdateHunter(p.name, -1, false);
-            
             socket.leave(room.id);
             socket.emit('returnToProfile'); 
             const activeHumans = room.players.filter(pl => !pl.quit && !pl.isAI);
@@ -620,7 +604,6 @@ function triggerRespawn(room, survivorId) {
     room.survivorTurns = 0;
     room.currentBattle = null;
     room.processing = false;
-    
     room.players.forEach(p => {
         if(!p.quit) {
             p.alive = true;
@@ -634,7 +617,6 @@ function triggerRespawn(room, survivorId) {
             }
         }
     });
-    
     for(let i=0; i<5; i++) spawnGate(room);
     finishTurn(room);
 }
@@ -650,12 +632,9 @@ function spawnGate(room) {
 
 function runAIMove(room, ai) {
     if(!room.active) return;
-    
     let target = null;
     let minDist = 999;
     const range = getMoveRange(ai.mana);
-
-    // 1. MONARCH PRIORITY
     const alivePlayers = room.players.filter(p => p.alive);
     if(alivePlayers.length === 1 && alivePlayers[0].id === ai.id) {
         const silverKey = Object.keys(room.world).find(k => room.world[k].rank === 'Silver');
@@ -664,8 +643,6 @@ function runAIMove(room, ai) {
              target = {x: sx, y: sy};
         }
     }
-
-    // 2. KILLABLE PLAYER PRIORITY
     if(!target) {
         const killable = room.players.filter(p => p.id !== ai.id && p.alive && ai.mana >= p.mana);
         if(killable.length > 0) {
@@ -675,8 +652,6 @@ function runAIMove(room, ai) {
              }
         }
     }
-
-    // 3. FARM GATE PRIORITY
     if (!target) {
         minDist = 999;
         for(const key in room.world) {
@@ -685,7 +660,6 @@ function runAIMove(room, ai) {
             if(ai.mana >= room.world[key].mana && dist < minDist) { minDist = dist; target = {x:gx, y:gy}; }
         }
     }
-
     let tx = ai.x, ty = ai.y;
     if(target) {
         const dx = target.x - ai.x; const dy = target.y - ai.y;
