@@ -25,6 +25,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 // GLOBAL STATE
 let rooms = {};
 let connectedUsers = {}; 
+let connectedDevices = {}; // NEW: Track unique devices
 let adminSocketId = null;
 
 // CONSTANTS
@@ -132,21 +133,20 @@ function syncAllGates() {
 // --- SOCKET LOGIC ---
 io.on('connection', (socket) => {
     
-    // --- ONE TAB PER DEVICE RESTRICTION ---
-    const clientIp = socket.handshake.address;
-    let alreadyConnected = false;
-    for (const [id, s] of io.sockets.sockets) {
-        if (s.id !== socket.id && s.handshake.address === clientIp) {
-            alreadyConnected = true;
-            break;
-        }
-    }
+    // --- ONE GAME PER DEVICE (Using Unique Device ID from Client) ---
+    const deviceId = socket.handshake.query.deviceId;
 
-    if (alreadyConnected) {
-        socket.emit('authError', "SYSTEM ALERT: MULTIPLE TABS DETECTED. CONNECTION REFUSED.");
-        socket.disconnect(true);
-        return; 
+    if (deviceId) {
+        if (connectedDevices[deviceId]) {
+            // Device is already connected -> Block this new connection
+            socket.emit('authError', "SYSTEM: DEVICE ALREADY CONNECTED IN ANOTHER TAB.");
+            socket.disconnect(true);
+            return;
+        }
+        // Register this device ID
+        connectedDevices[deviceId] = socket.id;
     }
+    // ----------------------------------------------------------------
 
     // 1. ADMIN ACTIONS
     socket.on('adminAction', (data) => {
@@ -337,7 +337,14 @@ io.on('connection', (socket) => {
     });
 
     socket.on('quitGame', () => handleDisconnect(socket, true));
-    socket.on('disconnect', () => handleDisconnect(socket, false));
+    
+    // --- HANDLE DISCONNECT & CLEANUP DEVICE ID ---
+    socket.on('disconnect', () => {
+        if (deviceId && connectedDevices[deviceId] === socket.id) {
+            delete connectedDevices[deviceId];
+        }
+        handleDisconnect(socket, false);
+    });
 });
 
 function startGame(room) {
