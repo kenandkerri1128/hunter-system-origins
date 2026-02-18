@@ -571,7 +571,7 @@ function handleWin(room, winnerName) {
     room.active = false;
     if(room.afkTimer) clearTimeout(room.afkTimer);
     
-    dbUpdateHunter(winnerName, room.isOnline ? 20 : 5, true);
+    dbUpdateHunter(winnerName, room.isOnline ? 25 : 6, true);
     
     room.players.forEach(p => { 
         if(p.name !== winnerName && !p.quit && !p.isAI) {
@@ -723,3 +723,4 @@ function broadcastGameState(room) {
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => console.log(`SYSTEM: ONLINE ON PORT ${PORT}`));
+
