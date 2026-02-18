@@ -236,7 +236,7 @@ io.on('connection', (socket) => {
                 isAdmin: (data.host === ADMIN_NAME), turnsWithoutBattle: 0, turnsWithoutPvP: 0, isStunned: false, stunDuration: 0
             }],
             world: {},
-            afkTimer: null 
+            afkTimer: null
         };
         socket.join(id);
         io.to(id).emit('waitingRoomUpdate', rooms[id]);
@@ -292,7 +292,7 @@ io.on('connection', (socket) => {
                 { id: 'ai3', name: AI_NAMES[3], slot: 3, ...CORNERS[3], mana: 200, rankLabel: "Lower D-Rank", alive: true, isAI: true, color: PLAYER_COLORS[3], quit: false, powerUp: null, turnsWithoutBattle: 0, turnsWithoutPvP: 0, isStunned: false, stunDuration: 0 }
             ],
             world: {},
-            afkTimer: null 
+            afkTimer: null
         };
         socket.join(id);
         startGame(rooms[id]);
@@ -306,7 +306,7 @@ io.on('connection', (socket) => {
                 p.activeBuff = data.powerUp;
                 p.powerUp = null;
                 io.to(r.id).emit('announcement', `${p.name} ACTIVATED ${data.powerUp}!`);
-                
+
                 // RESET AFK TIMER ON ACTION
                 if (r.afkTimer) { clearTimeout(r.afkTimer); r.afkTimer = null; }
             }
@@ -340,7 +340,6 @@ io.on('connection', (socket) => {
 
     socket.on('quitGame', () => handleDisconnect(socket, true));
     
-    // 6. DISCONNECT HANDLER (CLEANUP DEVICE ID)
     socket.on('disconnect', () => {
         if (deviceId && connectedDevices[deviceId] === socket.id) {
             delete connectedDevices[deviceId];
@@ -490,7 +489,6 @@ function checkSilverMonarchCondition(room) {
 function finishTurn(room) {
     if(!room.active) return;
     
-    // --- CLEAR OLD AFK TIMER ---
     if (room.afkTimer) { clearTimeout(room.afkTimer); room.afkTimer = null; }
 
     room.processing = false; 
@@ -548,14 +546,14 @@ function finishTurn(room) {
                  }
             } else {
                  validNext = true;
-                 
+
                  // --- START AFK TIMER IF HUMAN ---
                  if (!nextP.isAI) {
                      room.afkTimer = setTimeout(() => {
                          io.to(room.id).emit('announcement', `SYSTEM: ${nextP.name} WAS CONSUMED BY THE SHADOWS (AFK).`);
-                         const socket = io.sockets.sockets.get(nextP.id);
-                         if (socket) handleDisconnect(socket, true); // True = Quit
-                     }, 180000); // 3 minutes
+                         const afkSocket = io.sockets.sockets.get(nextP.id);
+                         if (afkSocket) handleDisconnect(afkSocket, true); 
+                     }, 180000); // 3 Minutes
                  }
             }
         }
@@ -573,10 +571,8 @@ function handleWin(room, winnerName) {
     room.active = false;
     if(room.afkTimer) clearTimeout(room.afkTimer);
     
-    // WINNER REWARDS: +20 (Online) or +5 (AI)
     dbUpdateHunter(winnerName, room.isOnline ? 20 : 5, true);
     
-    // LOSER PENALTIES (Applying -5 to anyone not the winner)
     room.players.forEach(p => { 
         if(p.name !== winnerName && !p.quit && !p.isAI) {
             dbUpdateHunter(p.name, -5, false); 
@@ -609,8 +605,6 @@ function handleDisconnect(socket, isQuit) {
         if(isQuit) {
             p.quit = true; p.alive = false; 
             
-            // --- QUIT PENALTY LOGIC ---
-            // Online (PvP) = -20 | Monarch Mode (AI) = -3
             const quitPenalty = room.isOnline ? -20 : -3;
             dbUpdateHunter(p.name, quitPenalty, false);
             
@@ -666,12 +660,9 @@ function spawnGate(room) {
 
 function runAIMove(room, ai) {
     if(!room.active) return;
-    
     let target = null;
     let minDist = 999;
     const range = getMoveRange(ai.mana);
-
-    // 1. MONARCH PRIORITY
     const alivePlayers = room.players.filter(p => p.alive);
     if(alivePlayers.length === 1 && alivePlayers[0].id === ai.id) {
         const silverKey = Object.keys(room.world).find(k => room.world[k].rank === 'Silver');
@@ -680,8 +671,6 @@ function runAIMove(room, ai) {
              target = {x: sx, y: sy};
         }
     }
-
-    // 2. KILLABLE PLAYER PRIORITY
     if(!target) {
         const killable = room.players.filter(p => p.id !== ai.id && p.alive && ai.mana >= p.mana);
         if(killable.length > 0) {
@@ -691,8 +680,6 @@ function runAIMove(room, ai) {
              }
         }
     }
-
-    // 3. FARM GATE PRIORITY
     if (!target) {
         minDist = 999;
         for(const key in room.world) {
@@ -701,7 +688,6 @@ function runAIMove(room, ai) {
             if(ai.mana >= room.world[key].mana && dist < minDist) { minDist = dist; target = {x:gx, y:gy}; }
         }
     }
-
     let tx = ai.x, ty = ai.y;
     if(target) {
         const dx = target.x - ai.x; const dy = target.y - ai.y;
@@ -720,6 +706,7 @@ function teleport(p) { p.x = rInt(15); p.y = rInt(15); }
 function rInt(max) { return Math.floor(Math.random() * max); }
 
 function broadcastGameState(room) {
+    const { afkTimer, ...roomState } = room; 
     room.players.forEach(p => {
         const socket = io.sockets.sockets.get(p.id);
         if(socket) {
@@ -729,7 +716,7 @@ function broadcastGameState(room) {
                 powerUp: (pl.id===p.id || pl.isAdmin) ? pl.powerUp : null,
                 displayRank: getDisplayRank(pl.mana)
             }));
-            socket.emit('gameStateUpdate', { ...room, players: sanitized, currentBattle: room.currentBattle }); 
+            socket.emit('gameStateUpdate', { ...roomState, players: sanitized, currentBattle: room.currentBattle }); 
         }
     });
 }
