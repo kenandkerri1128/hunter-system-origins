@@ -530,6 +530,19 @@
             }
         });
 
+        // --- NEW: KICKED HANDLER ---
+        socket.on('forceKick', () => {
+            sessionStorage.removeItem('hunter_creds');
+            sessionStorage.removeItem('last_screen');
+            document.body.innerHTML = `
+                <div style="display:flex; justify-content:center; align-items:center; height:100vh; background:#000; color:red; flex-direction:column; text-align:center;">
+                    <h1 style="font-size:3rem; color:red; text-shadow:0 0 20px red;">YOU HAVE BEEN KICKED BY THE ADMIN</h1>
+                    <p style="font-family:'Orbitron';">CONNECTION TERMINATED FORCEFULLY</p>
+                    <button class="sys-btn danger" onclick="location.reload()">ACKNOWLEDGE</button>
+                </div>
+            `;
+        });
+
         socket.on('authSuccess', (d) => {
             myHunter = d;
             sessionStorage.setItem('hunter_creds', JSON.stringify({u: d.username, p: currentPass}));
@@ -596,7 +609,6 @@
             box.scrollTop = box.scrollHeight;
         });
 
-        // --- NEW: Handle Admin Search Response ---
         socket.on('adminSearchResponse', (data) => {
             if (!data.found) {
                 alert("SYSTEM: " + data.message);
@@ -604,7 +616,6 @@
             }
             if (confirm(`TARGET LOCATED: ${data.roomName}\nPLAYERS: ${data.players.length}/4\nSPECTATE MATCH?`)) {
                 socket.emit('spectateRoom', data.roomId);
-                // Manually transition to game screen since spectating doesn't use standard gameStart
                 currentGateID = data.roomId;
                 transportAnimation(() => { showScreen('screen-game'); });
             }
@@ -634,7 +645,6 @@
             }, 1500);
         }
 
-        // --- Helper Function for Rank Letter ---
         function getRankLetter(hup) {
             if (hup >= 1000) return { letter: "S+", color: "var(--rank-s)" }; 
             if (hup >= 901) return { letter: "S", color: "var(--rank-s)" };
@@ -645,7 +655,6 @@
             return { letter: "E", color: "var(--rank-e)" };
         }
 
-        // --- Updated renderRankings Function ---
         function renderRankings() {
             const el = document.getElementById('world-rank-list');
             el.innerHTML = currentWorldRankings.slice(0, 15).map((u, i) => {
