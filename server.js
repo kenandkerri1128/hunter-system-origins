@@ -146,17 +146,14 @@ io.on('connection', (socket) => {
     socket.on('adminAction', (data) => {
         if (socket.id !== adminSocketId) return; 
         
-        // 1. KICK LOGIC (FIXED)
+        // 1. KICK LOGIC
         if (data.action === 'kick' && connectedUsers[data.target]) {
             const tid = connectedUsers[data.target];
             const targetSocket = io.sockets.sockets.get(tid);
             
             if (targetSocket) {
-                // Apply Quit Penalty & Logic first
                 handleDisconnect(targetSocket, true); 
-                // Send specific Kicked Screen signal
                 targetSocket.emit('forceKick');
-                // Finally Disconnect
                 targetSocket.disconnect(true);
             }
             delete connectedUsers[data.target];
@@ -252,12 +249,10 @@ io.on('connection', (socket) => {
         if(rid) socket.join(rid);
     });
     
-    // --- SPECTATE JOIN ---
     socket.on('spectateRoom', (roomId) => {
         if (rooms[roomId]) {
             socket.join(roomId);
             socket.emit('gameStart', { roomId: roomId });
-            // FORCE IMMEDIATE UPDATE FOR SPECTATOR
             broadcastGameState(rooms[roomId]); 
         }
     });
@@ -495,6 +490,7 @@ function resolveBattle(room, attacker, defender, isGate) {
                 if(battleDefender.rank === 'Silver') return handleWin(room, battleAttacker.name);
                 if(!battleAttacker.powerUp && Math.random() < 0.2) {
                     battleAttacker.powerUp = POWER_UPS[Math.floor(Math.random() * POWER_UPS.length)];
+                    // Send to attacker only (even if AI - effectively hidden)
                     io.to(battleAttacker.id).emit('announcement', `OBTAINED RUNE: ${battleAttacker.powerUp}`);
                 }
             } else {
@@ -720,15 +716,16 @@ function runAIMove(room, ai) {
     let target = null;
     let minDist = 999;
     const range = getMoveRange(ai.mana);
-    const alivePlayers = room.players.filter(p => p.alive);
-    if(alivePlayers.length === 1 && alivePlayers[0].id === ai.id) {
-        const silverKey = Object.keys(room.world).find(k => room.world[k].rank === 'Silver');
-        if(silverKey) {
-             const [sx, sy] = silverKey.split('-').map(Number);
-             target = {x: sx, y: sy};
-        }
+
+    // 1. SILVER MONARCH (Priority)
+    const silverKey = Object.keys(room.world).find(k => room.world[k].rank === 'Silver');
+    if (silverKey) {
+         const [sx, sy] = silverKey.split('-').map(Number);
+         target = {x: sx, y: sy};
     }
-    if(!target) {
+
+    // 2. WEAK PLAYERS
+    if (!target) {
         const killable = room.players.filter(p => p.id !== ai.id && p.alive && ai.mana >= p.mana);
         if(killable.length > 0) {
              for(const k of killable) {
@@ -737,6 +734,8 @@ function runAIMove(room, ai) {
              }
         }
     }
+
+    // 3. FARM GATES
     if (!target) {
         minDist = 999;
         for(const key in room.world) {
@@ -745,6 +744,7 @@ function runAIMove(room, ai) {
             if(ai.mana >= room.world[key].mana && dist < minDist) { minDist = dist; target = {x:gx, y:gy}; }
         }
     }
+
     let tx = ai.x, ty = ai.y;
     if(target) {
         const dx = target.x - ai.x; const dy = target.y - ai.y;
@@ -759,7 +759,32 @@ function runAIMove(room, ai) {
             if(dx !== 0) { let mx = (dx > 0) ? Math.min(dx, rem) : Math.max(dx, -rem); tx += mx; rem -= Math.abs(mx); }
             if(dy !== 0 && rem > 0) { let my = (dy > 0) ? Math.min(dy, rem) : Math.max(dy, -rem); ty += my; }
         }
+    } else {
+        // Random move if no target
+        tx = Math.max(0, Math.min(14, ai.x + (Math.random() < 0.5 ? 1 : -1)));
+        ty = Math.max(0, Math.min(14, ai.y + (Math.random() < 0.5 ? 1 : -1)));
     }
+
+    // --- AI POWER UP USAGE ---
+    if (ai.powerUp) {
+        // Check if next move triggers battle
+        const enemy = room.players.find(p => p.alive && p.x === tx && p.y === ty && p.id !== ai.id);
+        const gate = room.world[`${tx}-${ty}`];
+
+        if (enemy || gate) {
+            let activate = false;
+            if (ai.powerUp === 'RULERS POWER') activate = true;
+            else if (ai.powerUp === 'DOUBLE DAMAGE') activate = true;
+            else if (ai.powerUp === 'SOUL SWAP' && ai.mana < 300) activate = true;
+
+            if (activate) {
+                ai.activeBuff = ai.powerUp;
+                ai.powerUp = null;
+                io.to(room.id).emit('announcement', `${ai.name} ACTIVATED ${ai.activeBuff}!`);
+            }
+        }
+    }
+
     tx = Math.max(0, Math.min(14, tx)); ty = Math.max(0, Math.min(14, ty));
     processMove(room, ai, tx, ty);
 }
@@ -767,30 +792,18 @@ function runAIMove(room, ai) {
 function teleport(p) { p.x = rInt(15); p.y = rInt(15); }
 function rInt(max) { return Math.floor(Math.random() * max); }
 
-// --- FIXED: SPECTATOR & ADMIN VISIBILITY LOGIC ---
 async function broadcastGameState(room) {
     const { afkTimer, ...roomState } = room;
-    
-    // FETCH ALL SOCKETS IN ROOM (Includes Players AND Spectating Admin)
     const sockets = await io.in(room.id).fetchSockets();
 
     for (const socket of sockets) {
         const isSocketAdmin = (socket.id === adminSocketId);
-        
-        // Is this socket actually one of the players?
-        const mePlayer = room.players.find(p => p.id === socket.id);
-
         const sanitized = room.players.map(pl => ({
             ...pl,
-            // Admin sees EVERYONE'S Mana. Player sees only THEIR OWN.
             mana: (pl.id === socket.id || isSocketAdmin) ? pl.mana : null,
-            
-            // Admin sees '?' if powerup exists. Player sees their own actual powerup.
             powerUp: (pl.id === socket.id) ? pl.powerUp : (isSocketAdmin && pl.powerUp ? '?' : null),
-            
             displayRank: getDisplayRank(pl.mana)
         }));
-
         socket.emit('gameStateUpdate', { ...roomState, players: sanitized, currentBattle: room.currentBattle });
     }
 }
