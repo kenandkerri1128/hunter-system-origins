@@ -553,12 +553,18 @@ function finishTurn(room) {
 function handleWin(room, winnerName) {
     io.to(room.id).emit('victoryEvent', { winner: winnerName });
     room.active = false;
+    
+    // WINNER REWARDS: +20 (Online) or +5 (AI)
     dbUpdateHunter(winnerName, room.isOnline ? 20 : 5, true);
+    
+    // LOSER PENALTIES
     room.players.forEach(p => { 
         if(p.name !== winnerName && !p.quit && !p.isAI) {
+            // Apply -5 penalty for losing regardless of mode (PvP or Monarch) if you aren't the winner
             dbUpdateHunter(p.name, -5, false); 
         }
     });
+
     broadcastWorldRankings();
     setTimeout(() => { io.to(room.id).emit('returnToProfile'); delete rooms[room.id]; syncAllGates(); }, 6000);
 }
@@ -582,7 +588,12 @@ function handleDisconnect(socket, isQuit) {
         const p = room.players.find(pl => pl.id === socket.id);
         if(isQuit) {
             p.quit = true; p.alive = false; 
-            dbUpdateHunter(p.name, -1, false);
+            
+            // --- QUIT PENALTY LOGIC ---
+            // Online (PvP) = -20 | Monarch Mode (AI) = -3
+            const quitPenalty = room.isOnline ? -20 : -3;
+            dbUpdateHunter(p.name, quitPenalty, false);
+            
             socket.leave(room.id);
             socket.emit('returnToProfile'); 
             const activeHumans = room.players.filter(pl => !pl.quit && !pl.isAI);
@@ -604,6 +615,7 @@ function triggerRespawn(room, survivorId) {
     room.survivorTurns = 0;
     room.currentBattle = null;
     room.processing = false;
+    
     room.players.forEach(p => {
         if(!p.quit) {
             p.alive = true;
@@ -617,6 +629,7 @@ function triggerRespawn(room, survivorId) {
             }
         }
     });
+    
     for(let i=0; i<5; i++) spawnGate(room);
     finishTurn(room);
 }
@@ -632,9 +645,12 @@ function spawnGate(room) {
 
 function runAIMove(room, ai) {
     if(!room.active) return;
+    
     let target = null;
     let minDist = 999;
     const range = getMoveRange(ai.mana);
+
+    // 1. MONARCH PRIORITY
     const alivePlayers = room.players.filter(p => p.alive);
     if(alivePlayers.length === 1 && alivePlayers[0].id === ai.id) {
         const silverKey = Object.keys(room.world).find(k => room.world[k].rank === 'Silver');
@@ -643,6 +659,8 @@ function runAIMove(room, ai) {
              target = {x: sx, y: sy};
         }
     }
+
+    // 2. KILLABLE PLAYER PRIORITY
     if(!target) {
         const killable = room.players.filter(p => p.id !== ai.id && p.alive && ai.mana >= p.mana);
         if(killable.length > 0) {
@@ -652,6 +670,8 @@ function runAIMove(room, ai) {
              }
         }
     }
+
+    // 3. FARM GATE PRIORITY
     if (!target) {
         minDist = 999;
         for(const key in room.world) {
@@ -660,6 +680,7 @@ function runAIMove(room, ai) {
             if(ai.mana >= room.world[key].mana && dist < minDist) { minDist = dist; target = {x:gx, y:gy}; }
         }
     }
+
     let tx = ai.x, ty = ai.y;
     if(target) {
         const dx = target.x - ai.x; const dy = target.y - ai.y;
@@ -694,5 +715,3 @@ function broadcastGameState(room) {
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => console.log(`SYSTEM: ONLINE ON PORT ${PORT}`));
-
-
