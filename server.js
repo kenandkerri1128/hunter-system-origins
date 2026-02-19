@@ -8,7 +8,7 @@ const fs = require('fs');
 const app = express();
 const server = http.createServer(app);
 
-// NOTE: Ensure your frontend connects to: "https://originmanaseige.onrender.com"
+// NEW URL: https://originmanaseige.onrender.com
 const io = new Server(server, {
     cors: { origin: "*" },
     pingTimeout: 60000 
@@ -165,7 +165,8 @@ io.on('connection', (socket) => {
         if (fs.existsSync(skinDir)) {
             fs.readdirSync(skinDir).forEach(f => {
                 if(f.endsWith('.png') || f.endsWith('.jpg') || f.endsWith('.jpeg')) {
-                    if (f.startsWith('char_')) items.push(`char:${f}`);
+                    // FIX: We label it 'skin:' so the frontend UI tab recognizes it!
+                    if (f.startsWith('char_')) items.push(`skin:${f}`);
                     else if (f.startsWith('eagle_')) items.push(`eagle:${f}`);
                 }
             });
@@ -334,7 +335,8 @@ io.on('connection', (socket) => {
                     const player = r.players.find(p => p.name === data.username);
                     if (player) {
                         player.activeCosmetics = cosmetics; 
-                        player.skin = cosmetics.char || null; // Map 'char' strictly to player.skin globally
+                        // FIX: Ensure this pulls 'skin' so the characters sync globally again
+                        player.skin = cosmetics.skin || null; 
                         broadcastGameState(r);
                     }
                 }
@@ -378,7 +380,7 @@ io.on('connection', (socket) => {
                 mana, rankLabel: getFullRankLabel(mana), worldRankLabel: wr.label, 
                 alive: true, confirmed: false, color: PLAYER_COLORS[0], isAI: false, quit: false, powerUp: null,
                 isAdmin: (data.host === ADMIN_NAME), turnsWithoutBattle: 0, turnsWithoutPvP: 0, isStunned: false, stunDuration: 0,
-                skin: data.cosmetics?.char || null, // Map from 'char'
+                skin: data.cosmetics?.skin || null, // FIX: Restored to 'skin'
                 activeCosmetics: data.cosmetics || {}
             }],
             world: {},
@@ -407,7 +409,7 @@ io.on('connection', (socket) => {
                 mana, rankLabel: getFullRankLabel(mana), worldRankLabel: wr.label,
                 alive: true, confirmed: false, color: PLAYER_COLORS[slot], isAI: false, quit: false, powerUp: null,
                 isAdmin: (data.user === ADMIN_NAME), turnsWithoutBattle: 0, turnsWithoutPvP: 0, isStunned: false, stunDuration: 0,
-                skin: data.cosmetics?.char || null,
+                skin: data.cosmetics?.skin || null, // FIX: Restored to 'skin'
                 activeCosmetics: data.cosmetics || {}
             });
             socket.join(data.gateID);
@@ -441,7 +443,7 @@ io.on('connection', (socket) => {
             turn: 0, currentRoundMoves: 0, round: 1, spawnCounter: 0, 
             survivorTurns: 0, respawnHappened: false, currentBattle: null,
             players: [
-                { id: socket.id, name: data.user, slot: 0, ...CORNERS[0], mana, rankLabel: getFullRankLabel(mana), alive: true, isAI: false, color: PLAYER_COLORS[0], quit: false, powerUp: null, isAdmin: (data.user === ADMIN_NAME), turnsWithoutBattle: 0, turnsWithoutPvP: 0, isStunned: false, stunDuration: 0, skin: data.cosmetics?.char || null, activeCosmetics: data.cosmetics || {} },
+                { id: socket.id, name: data.user, slot: 0, ...CORNERS[0], mana, rankLabel: getFullRankLabel(mana), alive: true, isAI: false, color: PLAYER_COLORS[0], quit: false, powerUp: null, isAdmin: (data.user === ADMIN_NAME), turnsWithoutBattle: 0, turnsWithoutPvP: 0, isStunned: false, stunDuration: 0, skin: data.cosmetics?.skin || null, activeCosmetics: data.cosmetics || {} },
                 { id: 'ai1', name: AI_NAMES[1], slot: 1, ...CORNERS[1], mana: 200, rankLabel: "Lower D-Rank", alive: true, isAI: true, color: PLAYER_COLORS[1], quit: false, powerUp: null, turnsWithoutBattle: 0, turnsWithoutPvP: 0, isStunned: false, stunDuration: 0, skin: null, activeCosmetics: {} },
                 { id: 'ai2', name: AI_NAMES[2], slot: 2, ...CORNERS[2], mana: 233, rankLabel: "Higher D-Rank", alive: true, isAI: true, color: PLAYER_COLORS[2], quit: false, powerUp: null, turnsWithoutBattle: 0, turnsWithoutPvP: 0, isStunned: false, stunDuration: 0, skin: null, activeCosmetics: {} },
                 { id: 'ai3', name: AI_NAMES[3], slot: 3, ...CORNERS[3], mana: 200, rankLabel: "Lower D-Rank", alive: true, isAI: true, color: PLAYER_COLORS[3], quit: false, powerUp: null, turnsWithoutBattle: 0, turnsWithoutPvP: 0, isStunned: false, stunDuration: 0, skin: null, activeCosmetics: {} }
