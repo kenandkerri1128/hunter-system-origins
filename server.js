@@ -40,7 +40,7 @@ app.use('/uploads', express.static(path.join(__dirname, 'public', 'uploads')));
 let rooms = {};
 let connectedUsers = {}; 
 let connectedDevices = {}; 
-let pendingDisconnects = {}; // NEW: Tracks users who disconnected so we can give them a grace period to refresh
+let pendingDisconnects = {}; 
 let adminSocketId = null;
 
 // CONSTANTS
@@ -187,6 +187,10 @@ function getAllVaultItems() {
 // --- SOCKET LOGIC ---
 io.on('connection', (socket) => {
     
+    // SECURITY: Initialize individual socket cooldowns
+    socket.lastMsgTime = 0;
+    socket.lastGateTime = 0;
+
     const deviceId = socket.handshake.query.deviceId;
     if (deviceId) {
         if (connectedDevices[deviceId] && io.sockets.sockets.get(connectedDevices[deviceId])) {
@@ -265,6 +269,9 @@ io.on('connection', (socket) => {
     });
 
     socket.on('authRequest', async (data) => {
+        // SECURITY: Validate auth data structure
+        if (!data || typeof data.u !== 'string' || typeof data.p !== 'string') return;
+
         if (connectedUsers[data.u]) {
             const old = io.sockets.sockets.get(connectedUsers[data.u]);
             if (old && old.connected) return socket.emit('authError', "ALREADY LOGGED IN.");
@@ -279,7 +286,6 @@ io.on('connection', (socket) => {
 
         const { data: user } = await supabase.from('Hunters').select('*').eq('username', data.u).eq('password', data.p).maybeSingle();
         if (user) {
-            // NEW: If the user just refreshed, cancel their "tab close" penalty timer
             if (pendingDisconnects[user.username]) {
                 clearTimeout(pendingDisconnects[user.username]);
                 delete pendingDisconnects[user.username];
@@ -328,6 +334,8 @@ io.on('connection', (socket) => {
     });
 
     socket.on('equipItem', async (data) => {
+        if (!data || !data.username || !data.type || !data.item) return;
+
         try {
             const { data: user } = await supabase.from('Hunters').select('inventory, active_cosmetics').eq('username', data.username).single();
             const invString = `${data.type}:${data.item}`;
@@ -387,7 +395,17 @@ io.on('connection', (socket) => {
     });
 
     socket.on('sendMessage', (data) => {
-        const payload = { sender: data.senderName, text: data.message, rank: data.rank, timestamp: new Date().toLocaleTimeString(), isAdmin: (data.senderName === ADMIN_NAME) };
+        // SECURITY: Rate Limiting & Input Validation
+        const now = Date.now();
+        if (now - socket.lastMsgTime < 1000) { // 1 second cooldown
+            return socket.emit('announcement', 'SYSTEM: You are sending messages too fast.');
+        }
+        socket.lastMsgTime = now;
+
+        if (!data || typeof data.message !== 'string') return;
+        const safeMessage = data.message.substring(0, 200); // Prevent massive text spam
+
+        const payload = { sender: data.senderName, text: safeMessage, rank: data.rank, timestamp: new Date().toLocaleTimeString(), isAdmin: (data.senderName === ADMIN_NAME) };
         if (data.senderName === ADMIN_NAME && data.roomId === 'global') io.emit('receiveMessage', payload);
         else io.to(data.roomId).emit('receiveMessage', payload);
     });
@@ -396,6 +414,13 @@ io.on('connection', (socket) => {
     socket.on('requestWorldRankings', () => broadcastWorldRankings(socket));
 
     socket.on('createGate', async (data) => {
+        // SECURITY: Rate Limiting
+        const now = Date.now();
+        if (now - socket.lastGateTime < 5000) { // 5 second cooldown
+            return socket.emit('announcement', 'SYSTEM: Please wait before opening another Gate.');
+        }
+        socket.lastGateTime = now;
+
         const id = `monolith_${Date.now()}`;
         const wr = await getWorldRankDisplay(data.host);
         const mana = Math.floor(Math.random() * 251) + 50;
@@ -496,6 +521,10 @@ io.on('connection', (socket) => {
     });
 
     socket.on('playerAction', (data) => {
+        // SECURITY: Input Validation for Grid Coordinates
+        if (!data || typeof data.tx !== 'number' || typeof data.ty !== 'number') return;
+        if (data.tx < 0 || data.tx > 14 || data.ty < 0 || data.ty > 14) return; // Grid boundary check
+
         const r = Object.values(rooms).find(rm => rm.players.some(p => p.id === socket.id));
         if(!r || !r.active || r.processing) return; 
         
@@ -520,7 +549,6 @@ io.on('connection', (socket) => {
 
     socket.on('quitGame', () => handleDisconnect(socket, true));
     
-    // NEW: Grace Period Tab-Close Check
     socket.on('disconnect', () => {
         if (deviceId && connectedDevices[deviceId] === socket.id) {
             delete connectedDevices[deviceId];
@@ -529,13 +557,11 @@ io.on('connection', (socket) => {
         const username = Object.keys(connectedUsers).find(key => connectedUsers[key] === socket.id);
 
         if (username) {
-            // Give them 15 seconds to refresh and reconnect
             pendingDisconnects[username] = setTimeout(() => {
                 delete pendingDisconnects[username];
                 
-                // Only treat as a complete quit if they haven't reconnected
                 if (!connectedUsers[username] || connectedUsers[username] === socket.id) {
-                    handleDisconnect(socket, true); // Apply the full Quit Penalty
+                    handleDisconnect(socket, true); 
                 }
             }, 15000); 
         } else {
@@ -798,7 +824,6 @@ function handleWin(room, winnerName) {
     }, 6000);
 }
 
-// NEW: Refined HandleDisconnect to accurately apply penalties without double-triggering
 function handleDisconnect(socket, isQuit) {
     const room = Object.values(rooms).find(r => r.players.some(p => p.id === socket.id));
     if(room) {
@@ -819,13 +844,12 @@ function handleDisconnect(socket, isQuit) {
 
         const p = room.players.find(pl => pl.id === socket.id);
         
-        // CHECK !p.quit to prevent double penalizing them if they already explicitly quit
         if(isQuit && p && !p.quit) {
             p.quit = true; 
             p.alive = false; 
             
             const quitPenalty = room.isOnline ? -20 : -3;
-            dbUpdateHunter(p.name, quitPenalty, false); // Applies the HuP deduction and the Loss
+            dbUpdateHunter(p.name, quitPenalty, false); 
             
             socket.leave(room.id);
             socket.emit('returnToProfile'); 
@@ -843,7 +867,7 @@ function handleDisconnect(socket, isQuit) {
         if(room.players.filter(pl => !pl.quit && !pl.isAI).length === 0) {
             delete rooms[room.id]; 
         } else if (rooms[room.id]) {
-            broadcastGameState(room); // Broadcast so remaining players see the person is greyed out
+            broadcastGameState(room); 
         }
         syncAllMonoliths();
     }
