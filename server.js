@@ -8,7 +8,7 @@ const fs = require('fs');
 const app = express();
 const server = http.createServer(app);
 
-// CONNECTION URL: https://solo-leveling-board-game.onrender.com
+// CONNECTION URL: THIS MUST MATCH RENDER'S GENERATED DOMAIN
 const io = new Server(server, {
     cors: { origin: "*" },
     pingTimeout: 60000 
@@ -143,7 +143,7 @@ function syncAllMonoliths() {
     io.emit('updateGateList', list); 
 }
 
-// --- NEW FUNCTION: GRAB EVERY ITEM IN THE GAME ---
+// --- MASTER INVENTORY GENERATOR ---
 function getAllVaultItems() {
     const items = [];
     const skinDir = path.join(__dirname, 'public', 'uploads', 'skins');
@@ -171,6 +171,7 @@ function getAllVaultItems() {
     }
     return items;
 }
+
 
 // --- SOCKET LOGIC ---
 io.on('connection', (socket) => {
@@ -237,7 +238,6 @@ io.on('connection', (socket) => {
                         if (targetSocketId) {
                             const { data: freshUser } = await supabase.from('Hunters').select('inventory, active_cosmetics').eq('username', data.target).single();
                             
-                            // Send both arrays to keep UI populated and update owned stats
                             io.to(targetSocketId).emit('inventoryUpdate', { 
                                 inventory: getAllVaultItems(), 
                                 ownedItems: freshUser.inventory || [],
@@ -298,9 +298,7 @@ io.on('connection', (socket) => {
                 rank: getFullRankLabel(user.hunterpoints), color: RANK_COLORS[letter],
                 wins: user.wins||0, losses: user.losses||0, worldRank: (count||0)+1,
                 isAdmin: (user.username === ADMIN_NAME), music: null, 
-                // FIX: Send EVERY item to 'inventory' so the Vault displays them all
                 inventory: getAllVaultItems(), 
-                // FIX: Send what the player actually owns for locking mechanics
                 ownedItems: user.inventory || [], 
                 activeCosmetics: user.active_cosmetics || {}
             });
@@ -319,13 +317,13 @@ io.on('connection', (socket) => {
             
             const isAdmin = (data.username === ADMIN_NAME);
             
-            // SECURITY CHECK: Ensure they actually own it before equipping!
             if (isAdmin || (user && (user.inventory || []).includes(invString))) {
                 let cosmetics = user.active_cosmetics || {};
                 if (cosmetics[data.type] === data.item) cosmetics[data.type] = null;
                 else cosmetics[data.type] = data.item;
 
                 await supabase.from('Hunters').update({ active_cosmetics: cosmetics }).eq('username', data.username);
+                
                 socket.emit('inventoryUpdate', { 
                     inventory: getAllVaultItems(), 
                     ownedItems: user.inventory || [],
@@ -353,8 +351,8 @@ io.on('connection', (socket) => {
                     }
                 }
             } else {
-                // If they click an item they don't own, tell them it's locked!
-                socket.emit('announcement', `SYSTEM: ITEM LOCKED. YOU MUST BUY OR BE GRANTED THIS ITEM TO EQUIP IT.`);
+                // Sent back to frontend if they hack the UI and try to equip locked item
+                socket.emit('announcement', `SYSTEM: ITEM LOCKED. YOU MUST BUY OR BE GRANTED THIS ITEM.`);
             }
         } catch(e) { console.error(e); }
     });
