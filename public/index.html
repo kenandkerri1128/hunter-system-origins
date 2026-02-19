@@ -76,7 +76,8 @@
         }
         .sys-btn:hover { background: var(--sys-blue); color: #000; box-shadow: 0 0 15px var(--sys-blue); }
         .sys-btn:active { transform: scale(0.95); }
-        .sys-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .sys-btn:disabled { opacity: 0.5; cursor: not-allowed; border-color: #444; color: #666; }
+        .sys-btn:disabled:hover { background: #000; box-shadow: none; color: #666; }
         
         .sys-btn.danger { border-color: var(--rank-s); color: var(--rank-s); }
         .sys-btn.danger:hover { background: var(--rank-s); color: #000; box-shadow: 0 0 15px var(--rank-s); }
@@ -421,7 +422,6 @@
         let currentHunterPowerUp = null;
         let currentGameState = null; 
         let currentInvTab = 'skin';
-        let adminMasterVault = [];
 
         const POWER_ICONS = { 
             'DOUBLE DAMAGE': '⚔️', 'AIR WALK': '👣', 
@@ -505,7 +505,7 @@
             
             if (d.isAdmin) {
                 document.getElementById('admin-controls').style.display = 'flex';
-                socket.emit('requestAdminVault');
+                // Admins no longer need requestAdminVault because inventory gets sent on authSuccess now
             }
 
             const currentScreen = document.querySelector('.screen.active').id;
@@ -518,13 +518,6 @@
                 }
             }
             if(d.music) playTrack(d.music);
-        });
-
-        socket.on('adminVaultData', (items) => {
-            adminMasterVault = items;
-            if (document.getElementById('screen-inventory').classList.contains('active')) {
-                renderInventory(currentInvTab);
-            }
         });
 
         let sendItemData = null;
@@ -549,40 +542,61 @@
             }
         }
 
+        // --- NEW VAULT RENDER LOGIC ---
         function renderInventory(type) {
             currentInvTab = type;
             const grid = document.getElementById('inv-grid');
             grid.innerHTML = '';
             
-            let sourceList = myHunter.isAdmin ? adminMasterVault : (myHunter.inventory || []);
-            const items = sourceList.filter(i => i.startsWith(type + ':')).map(i => i.split(':')[1]);
+            // Get all items that match the requested tab
+            const itemsInTab = (myHunter.inventory || []).filter(obj => obj.type === type);
             
-            if (items.length === 0) {
-                grid.innerHTML = `<div style="color:#888; width:100%; text-align:center; margin-top:20px;">NO ITEMS FOUND.<br>${myHunter.isAdmin ? 'UPLOAD FILES TO YOUR SERVER DIRECTORY' : 'VISIT THE STORE SOON!'}</div>`;
+            if (itemsInTab.length === 0) {
+                grid.innerHTML = `<div style="color:#888; width:100%; text-align:center; margin-top:20px;">NO ITEMS FOUND IN SERVER FOLDER.</div>`;
                 return;
             }
 
-            items.forEach(item => {
-                const isEquipped = myHunter.activeCosmetics && myHunter.activeCosmetics[type] === item;
+            itemsInTab.forEach(obj => {
+                const isEquipped = myHunter.activeCosmetics && myHunter.activeCosmetics[type] === obj.item;
+                const isOwned = obj.isUnlocked || myHunter.isAdmin;
+
                 const box = document.createElement('div');
-                box.style = `width: 120px; height: 180px; border: 2px solid ${isEquipped ? 'var(--sys-gold)' : '#444'}; display:flex; flex-direction:column; align-items:center; padding:5px; background: rgba(0,0,0,0.8);`;
+                box.style = `
+                    width: 120px; height: 180px; display:flex; flex-direction:column; align-items:center; padding:5px; background: rgba(0,0,0,0.8); position: relative;
+                    border: 2px solid ${isEquipped ? 'var(--sys-gold)' : (isOwned ? '#444' : '#222')};
+                    opacity: ${isOwned ? '1' : '0.5'};
+                `;
                 
                 let preview = '';
                 if (type === 'music') preview = `<div style="font-size:3rem; margin:auto;">🎵</div>`;
                 else {
                     let folder = (type === 'bg') ? 'bg' : 'skins';
-                    preview = `<img src="/uploads/${folder}/${item}" style="max-width:100%; max-height:80px; margin:auto; object-fit:contain;">`;
+                    preview = `<img src="/uploads/${folder}/${obj.item}" style="max-width:100%; max-height:80px; margin:auto; object-fit:contain; filter: ${isOwned ? 'none' : 'grayscale(100%) brightness(0.5)'};">`;
                 }
 
-                let buttonsHTML = `<button class="sys-btn ${isEquipped ? 'gold' : ''}" style="min-width:0; width:100%; padding:5px; font-size:0.7rem; margin-top:auto;" onclick="equipItem('${type}', '${item}')">${isEquipped ? 'UNEQUIP' : 'EQUIP'}</button>`;
+                // If locked, show padlock
+                let padlock = !isOwned ? `<div style="position:absolute; top:30%; font-size:2rem; text-shadow:0 0 10px black;">🔒</div>` : '';
+
+                let buttonLabel = "LOCKED";
+                let buttonClass = "";
+                let buttonDisable = "disabled";
+
+                if (isOwned) {
+                    buttonLabel = isEquipped ? "UNEQUIP" : "EQUIP";
+                    buttonClass = isEquipped ? "gold" : "";
+                    buttonDisable = "";
+                }
+
+                let buttonsHTML = `<button class="sys-btn ${buttonClass}" style="min-width:0; width:100%; padding:5px; font-size:0.7rem; margin-top:auto;" onclick="equipItem('${type}', '${obj.item}')" ${buttonDisable}>${buttonLabel}</button>`;
                 
                 if (myHunter.isAdmin) {
-                    buttonsHTML += `<button class="sys-btn danger" style="min-width:0; width:100%; padding:5px; font-size:0.7rem; margin-top:5px; border-color:#888;" onclick="openSendModal('${type}', '${item}')">SEND ITEM</button>`;
+                    buttonsHTML += `<button class="sys-btn danger" style="min-width:0; width:100%; padding:5px; font-size:0.7rem; margin-top:5px; border-color:#888;" onclick="openSendModal('${type}', '${obj.item}')">SEND ITEM</button>`;
                 }
 
                 box.innerHTML = `
+                    ${padlock}
                     ${preview}
-                    <div style="font-size:0.6rem; margin-top:5px; word-break:break-all; text-align:center;">${item}</div>
+                    <div style="font-size:0.6rem; margin-top:5px; word-break:break-all; text-align:center;">${obj.item}</div>
                     ${buttonsHTML}
                 `;
                 grid.appendChild(box);
@@ -591,6 +605,7 @@
 
         function equipItem(type, item) { socket.emit('equipItem', { username: myHunter.username, type, item }); }
 
+        // Updated listener expects the object array
         socket.on('inventoryUpdate', (data) => {
             myHunter.inventory = data.inventory;
             myHunter.activeCosmetics = data.activeCosmetics;
@@ -810,11 +825,7 @@
                             }
                         } else {
                             cell.style.color = state.world[key].color; 
-                            if (state.hostCosmetics?.monolith) {
-                                cell.innerHTML = `<div class="custom-skin" style="filter: drop-shadow(0 0 5px currentColor); background-image: url('/uploads/skins/${state.hostCosmetics.monolith}'); width: 80%; height: 80%;"></div>`;
-                            } else {
-                                cell.innerHTML = `<div class="monolith"></div>`;
-                            }
+                            cell.innerHTML = `<div class="monolith"></div>`;
                         }
                     }
                     
@@ -872,6 +883,11 @@
             el.style.marginBottom = '5px';
             el.innerText = `[SYSTEM]: ${msg}`;
             feed.prepend(el);
+            
+            // Fix: If it's a locked item alert, show a standard JS alert so the player definitely sees it
+            if(msg.includes("ITEM LOCKED")) {
+                alert(msg);
+            }
         });
 
         socket.on('victoryEvent', (data) => {
