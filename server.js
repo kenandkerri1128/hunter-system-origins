@@ -8,7 +8,7 @@ const fs = require('fs');
 const app = express();
 const server = http.createServer(app);
 
-// NEW URL: https://originmanaseige.onrender.com
+// CONNECTION URL: https://solo-leveling-board-game.onrender.com
 const io = new Server(server, {
     cors: { origin: "*" },
     pingTimeout: 60000 
@@ -160,12 +160,12 @@ io.on('connection', (socket) => {
         if (socket.id !== adminSocketId) return;
         const items = [];
         
-        // PREFIX BASED NAMING CONVENTION LOGIC
+        // PREFIX BASED NAMING CONVENTION LOGIC (ALL IN ONE SKINS FOLDER)
         const skinDir = path.join(__dirname, 'public', 'uploads', 'skins');
         if (fs.existsSync(skinDir)) {
             fs.readdirSync(skinDir).forEach(f => {
                 if(f.endsWith('.png') || f.endsWith('.jpg') || f.endsWith('.jpeg')) {
-                    // FIX: We label it 'skin:' so the frontend UI tab recognizes it!
+                    // Mapped 'char_' directly to 'skin:' so the UI tab recognizes it
                     if (f.startsWith('char_')) items.push(`skin:${f}`);
                     else if (f.startsWith('eagle_')) items.push(`eagle:${f}`);
                 }
@@ -335,7 +335,6 @@ io.on('connection', (socket) => {
                     const player = r.players.find(p => p.name === data.username);
                     if (player) {
                         player.activeCosmetics = cosmetics; 
-                        // FIX: Ensure this pulls 'skin' so the characters sync globally again
                         player.skin = cosmetics.skin || null; 
                         broadcastGameState(r);
                     }
@@ -380,7 +379,7 @@ io.on('connection', (socket) => {
                 mana, rankLabel: getFullRankLabel(mana), worldRankLabel: wr.label, 
                 alive: true, confirmed: false, color: PLAYER_COLORS[0], isAI: false, quit: false, powerUp: null,
                 isAdmin: (data.host === ADMIN_NAME), turnsWithoutBattle: 0, turnsWithoutPvP: 0, isStunned: false, stunDuration: 0,
-                skin: data.cosmetics?.skin || null, // FIX: Restored to 'skin'
+                skin: data.cosmetics?.skin || null, 
                 activeCosmetics: data.cosmetics || {}
             }],
             world: {},
@@ -409,7 +408,7 @@ io.on('connection', (socket) => {
                 mana, rankLabel: getFullRankLabel(mana), worldRankLabel: wr.label,
                 alive: true, confirmed: false, color: PLAYER_COLORS[slot], isAI: false, quit: false, powerUp: null,
                 isAdmin: (data.user === ADMIN_NAME), turnsWithoutBattle: 0, turnsWithoutPvP: 0, isStunned: false, stunDuration: 0,
-                skin: data.cosmetics?.skin || null, // FIX: Restored to 'skin'
+                skin: data.cosmetics?.skin || null, 
                 activeCosmetics: data.cosmetics || {}
             });
             socket.join(data.gateID);
