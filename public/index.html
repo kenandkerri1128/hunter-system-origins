@@ -37,7 +37,6 @@
             display: none; 
             flex-direction: column; 
             align-items: center; 
-            /* FIX: flex-start prevents top/bottom cutoff on mobile when scrolling */
             justify-content: flex-start; 
             padding-top: 5vh;
             padding-bottom: 5vh;
@@ -52,7 +51,6 @@
         }
         .active { display: flex !important; }
 
-        /* Keep Auth strictly centered */
         #screen-auth { justify-content: center; padding: 0; background: radial-gradient(circle at center, #111 0%, #000 100%); }
         
         #screen-game {
@@ -61,7 +59,7 @@
             align-items: center;
             width: 100vw;
             height: 100vh;
-            padding: 0; /* Reset padding for full screen */
+            padding: 0; 
             overflow: hidden;
             background-color: #000;
         }
@@ -207,7 +205,6 @@
         .hud-left { width: 300px; display: flex; flex-direction: column; height: 100%; border-right: 1px solid #333; padding: 20px; box-sizing: border-box; flex-shrink: 0; }
         .hud-right { width: 300px; display: flex; flex-direction: column; height: 100%; border-left: 1px solid #333; padding: 20px; box-sizing: border-box; flex-shrink: 0; }
 
-        /* SCROLLBAR STYLING FOR SLEEKER LOOK */
         ::-webkit-scrollbar { width: 8px; }
         ::-webkit-scrollbar-track { background: #111; }
         ::-webkit-scrollbar-thumb { background: var(--sys-blue); border-radius: 4px; }
@@ -432,37 +429,29 @@
     </div>
 
     <script>
-        let myDeviceId = localStorage.getItem('hunter_device_id');
-        if (!myDeviceId) {
-            myDeviceId = 'dev_' + Math.random().toString(36).substr(2, 9) + '_' + Date.now();
-            localStorage.setItem('hunter_device_id', myDeviceId);
+        const RENDER_URL = "https://solo-leveling-board-game.onrender.com";
+        const socket = io(RENDER_URL, { query: { deviceId: localStorage.getItem('hunter_device_id') || ('dev_' + Math.random().toString(36).substr(2, 9)) } });
+
+        let myHunter = null, myRoomID = 'profile_page', currentBGM = "", currentGateID = null, currentInvTab = 'skin';
+        let currentHunterPowerUp = null, currentGameState = null, currentWorldRankings = [];
+        const BGM = document.getElementById('bgm');
+
+        const POWER_ICONS = { 'DOUBLE DAMAGE': '⚔️', 'AIR WALK': '👣', 'SOUL SWAP': '🌀', 'RULERS POWER': '👑', '?': '❓' };
+
+        function playTrack(name) {
+            if(!name || currentBGM === name) return;
+            currentBGM = name;
+            BGM.src = (name === 'menu.mp3' || name === 'waiting.mp3' || name === 'gameplay.mp3') ? `/music/${name}` : `/uploads/music/${name}`;
+            BGM.play().catch(()=>{});
         }
 
-        const socket = io({ query: { deviceId: myDeviceId } });
-
-        let myHunter = null;
-        let myRoomID = 'profile_page'; 
-        let currentPass = "";
-        let currentWorldRankings = [];
-        let currentBGM = "";
-        let currentGateID = null;
-        let currentHunterPowerUp = null;
-        let currentGameState = null; 
-        let currentInvTab = 'skin';
-
-        const POWER_ICONS = { 
-            'DOUBLE DAMAGE': '⚔️', 'AIR WALK': '👣', 
-            'SOUL SWAP': '🌀', 'RULERS POWER': '👑', '?': '❓' 
-        };
-
-        const BGM = document.getElementById('bgm');
-        function playTrack(name) {
-            if(!name) return; 
-            if (currentBGM !== name) {
-                currentBGM = name;
-                if(name !== 'menu.mp3' && name !== 'waiting.mp3' && name !== 'gameplay.mp3') BGM.src = `/uploads/music/${name}`;
-                else BGM.src = `/music/${name}`;
-                BGM.play().catch(()=>{});
+        function auth(type) {
+            const u = document.getElementById('u').value, p = document.getElementById('p').value;
+            if(u && p) {
+                currentPass = p;
+                socket.emit('authRequest', { type, u, p });
+            } else {
+                document.getElementById('auth-msg').innerText = "ENTER CREDENTIALS";
             }
         }
 
@@ -475,7 +464,6 @@
                         document.getElementById('u').value = c.u;
                         document.getElementById('p').value = c.p;
                         currentPass = c.p;
-                        myHunter = { username: c.u }; 
                         socket.emit('authRequest', { type: 'login', u: c.u, p: c.p });
                     }
                 } catch(e) {}
@@ -489,23 +477,10 @@
             location.reload();
         }
 
-        function auth(type) {
-            const u = document.getElementById('u').value;
-            const p = document.getElementById('p').value;
-            document.getElementById('auth-msg').innerText = "";
-            if(!u || !p) { document.getElementById('auth-msg').innerText = "ENTER CREDENTIALS"; return; }
-            currentPass = p;
-            myHunter = { username: u };
-            socket.emit('authRequest', { type, u, p });
-        }
-
         socket.on('authError', (msg) => { 
             document.getElementById('auth-msg').innerText = msg;
-            if(msg.includes('MULTIPLE') || msg.includes('DEVICE')) { 
-                alert(msg); window.location.href = "about:blank"; 
-            } else if(msg.includes('ALREADY')) { 
-                alert(msg); location.reload(); 
-            }
+            if(msg.includes('MULTIPLE') || msg.includes('DEVICE')) { alert(msg); window.location.href = "about:blank"; } 
+            else if(msg.includes('ALREADY')) { alert(msg); location.reload(); }
         });
 
         socket.on('forceKick', () => {
@@ -554,33 +529,24 @@
             document.getElementById('sm-target').value = '';
             document.getElementById('send-modal').style.display = 'flex';
         }
-        function closeSendModal() {
-            document.getElementById('send-modal').style.display = 'none';
-        }
+        function closeSendModal() { document.getElementById('send-modal').style.display = 'none'; }
         function confirmSend() {
             const target = document.getElementById('sm-target').value.trim();
             if (target && sendItemData) {
-                socket.emit('adminAction', { 
-                    action: 'grantItem', 
-                    target: target, 
-                    item: `${sendItemData.type}:${sendItemData.item}` 
-                });
+                socket.emit('adminAction', { action: 'grantItem', target: target, item: `${sendItemData.type}:${sendItemData.item}` });
                 closeSendModal();
             }
         }
 
-        // --- NEW VAULT RENDER LOGIC ---
+        // --- FULLY RESTORED VAULT RENDER LOGIC ---
         function renderInventory(type) {
             currentInvTab = type;
             const grid = document.getElementById('inv-grid');
             grid.innerHTML = '';
             
-            // 1. Grab ALL master items from the server
             const allItems = myHunter.inventory || [];
-            // 2. Grab only what this specific player actually owns from the database
             const ownedItems = myHunter.ownedItems || [];
             
-            // Filter the master list down to just the tab we clicked on (e.g., 'skin')
             const itemsInTab = allItems.filter(i => i.startsWith(type + ':')).map(i => i.split(':')[1]);
             
             if (itemsInTab.length === 0) {
@@ -590,7 +556,6 @@
 
             itemsInTab.forEach(item => {
                 const invString = `${type}:${item}`;
-                // An item is unlocked if the player owns it OR if they are the admin
                 const isOwned = myHunter.isAdmin || ownedItems.includes(invString);
                 const isEquipped = myHunter.activeCosmetics && myHunter.activeCosmetics[type] === item;
 
@@ -608,7 +573,6 @@
                     preview = `<img src="/uploads/${folder}/${item}" style="max-width:100%; max-height:80px; margin:auto; object-fit:contain; filter: ${isOwned ? 'none' : 'grayscale(100%) brightness(0.5)'};">`;
                 }
 
-                // If locked, show padlock emoji over the image
                 let padlock = !isOwned ? `<div style="position:absolute; top:30%; font-size:2rem; text-shadow:0 0 10px black; z-index:5;">🔒</div>` : '';
 
                 let buttonLabel = "LOCKED";
@@ -639,7 +603,6 @@
 
         function equipItem(type, item) { socket.emit('equipItem', { username: myHunter.username, type, item }); }
 
-        // Update listener to properly store both arrays
         socket.on('inventoryUpdate', (data) => {
             myHunter.inventory = data.inventory;
             myHunter.ownedItems = data.ownedItems;
@@ -689,6 +652,29 @@
             box.appendChild(line);
             box.scrollTop = box.scrollHeight;
         });
+
+        socket.on('updateAdminRoomList', (l) => {
+            const el = document.getElementById('admin-room-list');
+            if(!el) return;
+            el.innerHTML = l.map(r => `
+                <div class="room-item" style="border-color: var(--sys-gold); display:flex; justify-content:space-between; align-items:center; background: rgba(255, 204, 0, 0.05);" onclick="spectateAsAdmin('${r.id}')">
+                    <div>
+                        <span style="color:var(--sys-gold); font-weight:bold;">${r.isOnline ? 'MULTIPLAYER' : 'SOLO AI'}</span> |
+                        <span style="color:#fff;">${r.name}</span>
+                        <div style="font-size:0.7rem; color:#aaa; margin-top:3px;">PLAYERS: ${r.players}</div>
+                    </div>
+                    <button class="sys-btn gold" style="min-width: auto; padding: 5px 10px; font-size: 0.7rem; margin:0;">SPECTATE</button>
+                </div>
+            `).join('');
+        });
+
+        function spectateAsAdmin(roomId) {
+            if (confirm('SPECTATE THIS ACTIVE INSTANCE?')) {
+                socket.emit('spectateRoom', roomId);
+                currentGateID = roomId;
+                transportAnimation(() => { showScreen('screen-game'); });
+            }
+        }
 
         socket.on('adminSearchResponse', (data) => {
             if (!data.found) { alert("SYSTEM: " + data.message); return; }
@@ -784,30 +770,6 @@
             el.innerHTML = list.map(r => `<div class="room-item" onclick="socket.emit('joinGate', {gateID: '${r.id}', user: myHunter.username, cosmetics: myHunter.activeCosmetics})"><span>${r.name} ${myHunter.isAdmin ? `<small style="color:red">[${r.id}]</small>` : ''}</span><span style="color:var(--sys-blue)">${r.count}/4</span></div>`).join('');
         });
 
-        // ADMIN FEATURE: Update Active Rooms List
-        socket.on('updateAdminRoomList', (list) => {
-            const el = document.getElementById('admin-room-list');
-            if(!el) return;
-            el.innerHTML = list.map(r => `
-                <div class="room-item" style="border-color: var(--sys-gold); display:flex; justify-content:space-between; align-items:center; background: rgba(255, 204, 0, 0.05);" onclick="spectateAsAdmin('${r.id}')">
-                    <div>
-                        <span style="color:var(--sys-gold); font-weight:bold;">${r.isOnline ? 'MULTIPLAYER' : 'SOLO AI'}</span> |
-                        <span style="color:#fff;">${r.name}</span>
-                        <div style="font-size:0.7rem; color:#aaa; margin-top:3px;">PLAYERS: ${r.players}</div>
-                    </div>
-                    <button class="sys-btn gold" style="min-width: auto; padding: 5px 10px; font-size: 0.7rem; margin:0;">SPECTATE</button>
-                </div>
-            `).join('');
-        });
-
-        function spectateAsAdmin(roomId) {
-            if (confirm('SPECTATE THIS ACTIVE INSTANCE?')) {
-                socket.emit('spectateRoom', roomId);
-                currentGateID = roomId;
-                transportAnimation(() => { showScreen('screen-game'); });
-            }
-        }
-
         socket.on('waitingRoomUpdate', (room) => {
             currentGateID = room.id;
             if (!document.getElementById('screen-waiting').classList.contains('active')) showScreen('screen-waiting');
@@ -827,6 +789,7 @@
         function quitAction() { socket.emit('quitGame'); currentGateID = null; document.getElementById('victory-screen').style.display = 'none'; showScreen('screen-menu'); }
         socket.on('returnToProfile', () => { currentGateID = null; document.getElementById('victory-screen').style.display = 'none'; showScreen('screen-menu'); document.getElementById('screen-game').style.backgroundImage = 'none';});
 
+        // --- FULL GAME STATE UPDATE (BOARD RENDERING) RESTORED ---
         socket.on('gameStateUpdate', (state) => {
             if (!state.active) return;
             currentGameState = state;
