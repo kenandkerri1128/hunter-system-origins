@@ -7,6 +7,8 @@ const fs = require('fs');
 
 const app = express();
 const server = http.createServer(app);
+
+// NOTE: Ensure your frontend connects to: "https://originmanaseige.onrender.com"
 const io = new Server(server, {
     cors: { origin: "*" },
     pingTimeout: 60000 
@@ -162,9 +164,8 @@ io.on('connection', (socket) => {
         const skinDir = path.join(__dirname, 'public', 'uploads', 'skins');
         if (fs.existsSync(skinDir)) {
             fs.readdirSync(skinDir).forEach(f => {
-                if(f.endsWith('.png') || f.endsWith('.jpg')) {
+                if(f.endsWith('.png') || f.endsWith('.jpg') || f.endsWith('.jpeg')) {
                     if (f.startsWith('char_')) items.push(`char:${f}`);
-                    else if (f.startsWith('mono_')) items.push(`mono:${f}`);
                     else if (f.startsWith('eagle_')) items.push(`eagle:${f}`);
                 }
             });
