@@ -527,7 +527,6 @@
             }
         });
 
-        // --- UPDATED ADMIN SEND LOGIC ---
         let sendItemData = null;
         function openSendModal(type, item) {
             sendItemData = { type, item };
@@ -555,9 +554,7 @@
             const grid = document.getElementById('inv-grid');
             grid.innerHTML = '';
             
-            // If Admin, show master folder list. If player, show personal inventory.
             let sourceList = myHunter.isAdmin ? adminMasterVault : (myHunter.inventory || []);
-            
             const items = sourceList.filter(i => i.startsWith(type + ':')).map(i => i.split(':')[1]);
             
             if (items.length === 0) {
@@ -579,7 +576,6 @@
 
                 let buttonsHTML = `<button class="sys-btn ${isEquipped ? 'gold' : ''}" style="min-width:0; width:100%; padding:5px; font-size:0.7rem; margin-top:auto;" onclick="equipItem('${type}', '${item}')">${isEquipped ? 'UNEQUIP' : 'EQUIP'}</button>`;
                 
-                // Add SEND button exclusively for Admin
                 if (myHunter.isAdmin) {
                     buttonsHTML += `<button class="sys-btn danger" style="min-width:0; width:100%; padding:5px; font-size:0.7rem; margin-top:5px; border-color:#888;" onclick="openSendModal('${type}', '${item}')">SEND ITEM</button>`;
                 }
@@ -593,9 +589,7 @@
             });
         }
 
-        function equipItem(type, item) {
-            socket.emit('equipItem', { username: myHunter.username, type, item });
-        }
+        function equipItem(type, item) { socket.emit('equipItem', { username: myHunter.username, type, item }); }
 
         socket.on('inventoryUpdate', (data) => {
             myHunter.inventory = data.inventory;
@@ -663,7 +657,7 @@
             if (id === 'screen-menu') { 
                 playTrack('menu.mp3'); 
                 moveChatTo('chat-global-anchor', 'profile_page'); 
-                socket.emit('requestWorldRankings'); // Force refresh rankings
+                socket.emit('requestWorldRankings'); 
             }
             else if (id === 'screen-lobby') moveChatTo('chat-lobby-anchor', 'lobby_main');
             else if (id === 'screen-waiting') moveChatTo('chat-waiting-anchor', currentGateID);
@@ -693,14 +687,10 @@
             return { letter: "E", color: "var(--rank-e)" };
         }
 
-        // --- FIXED RANKING RENDER ---
         function renderRankings() {
             const el = document.getElementById('world-rank-list');
             if(!el) return;
-            
-            // Added safety fallback (|| []) in case server sends nothing
             const safeList = currentWorldRankings || []; 
-            
             el.innerHTML = safeList.slice(0, 15).map((u, i) => {
                 const rankData = getRankLetter(u.hunterpoints);
                 return `
@@ -725,10 +715,7 @@
             }).join('');
         }
         
-        socket.on('updateWorldRankings', (l) => { 
-            currentWorldRankings = l; 
-            renderRankings(); 
-        });
+        socket.on('updateWorldRankings', (l) => { currentWorldRankings = l; renderRankings(); });
         
         function doAdmin(action) {
             if (action === 'kick') socket.emit('adminAction', { action: 'kick', target: document.getElementById('adm-kick').value });
