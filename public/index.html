@@ -323,15 +323,21 @@
                     <button class="sys-btn" style="width:100%; padding: 5px;" onclick="doAdmin('search')">SEARCH & WATCH</button>
                     
                     <div style="display:flex; gap:5px; width:100%;">
-                        <input id="adm-grant-user" class="sys-input" style="width:50%; padding: 5px; font-size: 0.8rem; margin:0;" placeholder="Username">
-                        <input id="adm-grant-item" class="sys-input" style="width:50%; padding: 5px; font-size: 0.8rem; margin:0;" placeholder="skin_x.png">
+                        <input id="adm-grant-user" class="sys-input" style="width:35%; padding: 5px; font-size: 0.8rem; margin:0;" placeholder="User">
+                        <select id="adm-grant-type" class="sys-input" style="width:30%; padding: 5px; font-size: 0.8rem; margin:0; background:#000; color:var(--sys-blue);">
+                            <option value="skin">Skin</option>
+                            <option value="bg">Background</option>
+                            <option value="monolith">Monolith</option>
+                            <option value="eagle">Eagle</option>
+                            <option value="music">Music</option>
+                        </select>
+                        <input id="adm-grant-item" class="sys-input" style="width:35%; padding: 5px; font-size: 0.8rem; margin:0;" placeholder="premium.png">
                     </div>
                     <button class="sys-btn gold" style="width:100%; padding: 5px;" onclick="doAdmin('grantItem')">GRANT ITEM</button>
                 </div>
 
                 <div style="margin-top: auto; display: flex; flex-direction: column; gap: 10px; width: 100%;">
                     <button class="sys-btn" style="width: 100%; border-color:var(--sys-gold); color:var(--sys-gold);" onclick="showScreen('screen-inventory'); renderInventory('skin');">VAULT (INVENTORY)</button>
-                    
                     <button class="sys-btn gold" style="width: 100%;" onclick="startAI('Eagle')">EAGLE MODE (+5)</button>
                     <button class="sys-btn" style="width: 100%; border-color:var(--sys-blue); color:var(--sys-blue);" onclick="window.open('/guide.html', '_blank')">SYSTEM GUIDE</button>
                     <button class="sys-btn" style="width: 100%;" onclick="openOnlineLobby()">MULTIPLAYER</button>
@@ -467,9 +473,12 @@
             if(!name) return; 
             if (currentBGM !== name) {
                 currentBGM = name;
-                // Check if custom music from DB
-                if(name.startsWith('music_')) BGM.src = `/uploads/music/${name}`;
-                else BGM.src = `/music/${name}`;
+                // Custom store music logic
+                if(name !== 'menu.mp3' && name !== 'waiting.mp3' && name !== 'gameplay.mp3') {
+                    BGM.src = `/uploads/music/${name}`;
+                } else {
+                    BGM.src = `/music/${name}`;
+                }
                 BGM.play().catch(()=>{});
             }
         }
@@ -555,13 +564,16 @@
             if(d.music) playTrack(d.music);
         });
 
-        // --- INVENTORY LOGIC ---
+        // --- UPDATED: INVENTORY LOGIC ---
         function renderInventory(type) {
             currentInvTab = type;
             const grid = document.getElementById('inv-grid');
             grid.innerHTML = '';
             
-            const items = (myHunter.inventory || []).filter(i => i.startsWith(type + '_'));
+            // Extract just the filename from strings like "skin:premium.png"
+            const items = (myHunter.inventory || [])
+                .filter(i => i.startsWith(type + ':'))
+                .map(i => i.split(':')[1]);
             
             if (items.length === 0) {
                 grid.innerHTML = '<div style="color:#888; width:100%; text-align:center; margin-top:20px;">NO ITEMS FOUND IN THIS VAULT SECTION.<br>VISIT THE STORE SOON!</div>';
@@ -601,7 +613,6 @@
             }
         });
 
-        // --- CHAT SYSTEM ---
         let chatElement = null;
         function initChat() {
             const tpl = document.getElementById('chat-template');
@@ -660,7 +671,7 @@
             if (id === 'screen-menu') { playTrack('menu.mp3'); moveChatTo('chat-global-anchor', 'profile_page'); }
             else if (id === 'screen-lobby') moveChatTo('chat-lobby-anchor', 'lobby_main');
             else if (id === 'screen-waiting') moveChatTo('chat-waiting-anchor', currentGateID);
-            else if (id === 'screen-game') { moveChatTo('chat-game-anchor', currentGateID); } // Music handled by hostCosmetics
+            else if (id === 'screen-game') { moveChatTo('chat-game-anchor', currentGateID); } 
             else if (id === 'screen-inventory') { /* Keep profile music */ }
         }
 
@@ -714,11 +725,19 @@
             }).join('');
         }
         
+        // --- UPDATED ADMIN FUNCTION ---
         function doAdmin(action) {
             if (action === 'kick') socket.emit('adminAction', { action: 'kick', target: document.getElementById('adm-kick').value });
             if (action === 'broadcast') socket.emit('adminAction', { action: 'broadcast', message: document.getElementById('adm-bc').value });
             if (action === 'search') socket.emit('adminAction', { action: 'search', target: document.getElementById('adm-search').value });
-            if (action === 'grantItem') socket.emit('adminAction', { action: 'grantItem', target: document.getElementById('adm-grant-user').value, item: document.getElementById('adm-grant-item').value });
+            if (action === 'grantItem') {
+                const user = document.getElementById('adm-grant-user').value;
+                const type = document.getElementById('adm-grant-type').value;
+                const filename = document.getElementById('adm-grant-item').value;
+                if(user && filename) {
+                    socket.emit('adminAction', { action: 'grantItem', target: user, item: type + ':' + filename });
+                }
+            }
         }
 
         function openOnlineLobby() { if(!myHunter) return; showScreen('screen-lobby'); socket.emit('requestGateList'); }
@@ -762,7 +781,6 @@
             if(turnPlayer.isStunned) { ind.innerText = `>> ${turnPlayer.name.toUpperCase()} IS STUNNED (SKIP)`; ind.style.color = '#888'; } 
             else { ind.innerText = isMyTurn ? ">> YOUR TURN" : `>> ${turnPlayer.name.toUpperCase()}'S TURN`; ind.style.color = turnPlayer.color; }
 
-            // --- HOST COSMETICS RENDER (BG & MUSIC) ---
             if (state.hostCosmetics?.bg) {
                 document.getElementById('screen-game').style.backgroundImage = `url('/uploads/bg/${state.hostCosmetics.bg}')`;
                 document.getElementById('screen-game').style.backgroundSize = 'cover';
@@ -800,7 +818,6 @@
                     const cell = document.createElement('div'); cell.className = 'cell';
                     const key = `${x}-${y}`;
                     
-                    // --- MONOLITH / EAGLE RENDERER ---
                     if (state.world[key]) {
                         if(state.world[key].rank === 'Eagle') {
                             if (state.hostCosmetics?.eagle) {
@@ -818,7 +835,6 @@
                         }
                     }
                     
-                    // --- PLAYER RENDERER (Supports Skins) ---
                     const pAtCell = state.players.find(p => p.alive && p.x === x && p.y === y);
                     if (pAtCell) {
                          const stunStyle = pAtCell.isStunned ? 'opacity:0.5; filter:grayscale(100%);' : '';
