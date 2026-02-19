@@ -3,6 +3,7 @@ const http = require('http');
 const { Server } = require('socket.io');
 const { createClient } = require('@supabase/supabase-js');
 const path = require('path');
+const fs = require('fs');
 
 const app = express();
 const server = http.createServer(app);
@@ -20,7 +21,20 @@ const SUPABASE_URL = 'https://wfsuxqgvshrhqfvnkzdx.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_gV-RZMfBZ1dLU60Ht4J9iw_-sRWSKnL'; 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
+// --- ASSET DIRECTORIES (STORE PREP) ---
+const uploadDirs = [
+    path.join(__dirname, 'public', 'uploads', 'skins'),
+    path.join(__dirname, 'public', 'uploads', 'bg'),
+    path.join(__dirname, 'public', 'uploads', 'music')
+];
+uploadDirs.forEach(dir => {
+    if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+    }
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
+app.use('/uploads', express.static(path.join(__dirname, 'public', 'uploads'))); // Serve store assets
 
 // GLOBAL STATE
 let rooms = {};
@@ -34,7 +48,7 @@ const AI_NAMES = ["Ken Ayag", "P2", "P3", "P4"];
 const PLAYER_COLORS = ['#00d2ff', '#ff3e3e', '#bcff00', '#ff00ff']; 
 
 const RANK_COLORS = { 
-    'E': '#00ff00', 'D': '#99ff00', 'C': '#ffff00', 'B': '#ff9900', 'A': '#ff00ff', 'S': '#ff0000', 'Silver': '#ffffff' 
+    'E': '#00ff00', 'D': '#99ff00', 'C': '#ffff00', 'B': '#ff9900', 'A': '#ff00ff', 'S': '#ff0000', 'Eagle': '#ffffff' 
 };
 
 const POWER_UPS = ['DOUBLE DAMAGE', 'AIR WALK', 'SOUL SWAP', 'RULERS POWER'];
@@ -124,9 +138,9 @@ async function broadcastWorldRankings() {
     } catch(e) {}
 }
 
-function syncAllGates() {
+function syncAllMonoliths() {
     const list = Object.values(rooms).filter(r => r.isOnline && !r.active).map(r => ({ id: r.id, name: r.name, count: r.players.length }));
-    io.emit('updateGateList', list);
+    io.emit('updateGateList', list); // Kept event name for compatibility with index.html
 }
 
 // --- SOCKET LOGIC ---
@@ -233,12 +247,13 @@ io.on('connection', (socket) => {
                 username: user.username, mana: user.hunterpoints, 
                 rank: getFullRankLabel(user.hunterpoints), color: RANK_COLORS[letter],
                 wins: user.wins||0, losses: user.losses||0, worldRank: (count||0)+1,
-                isAdmin: (user.username === ADMIN_NAME), music: reconnected ? null : 'menu.mp3'
+                isAdmin: (user.username === ADMIN_NAME), music: reconnected ? null : 'menu.mp3',
+                activeSkin: user.active_skin || null // Future store compatibility
             });
             
             socket.join('profile_page');
             
-            if(!reconnected) { syncAllGates(); broadcastWorldRankings(); }
+            if(!reconnected) { syncAllMonoliths(); broadcastWorldRankings(); }
         } else {
             socket.emit('authError', "INVALID CREDENTIALS.");
         }
@@ -266,11 +281,11 @@ io.on('connection', (socket) => {
         }
     });
 
-    socket.on('requestGateList', syncAllGates);
+    socket.on('requestGateList', syncAllMonoliths);
     socket.on('requestWorldRankings', broadcastWorldRankings);
 
     socket.on('createGate', async (data) => {
-        const id = `gate_${Date.now()}`;
+        const id = `monolith_${Date.now()}`;
         const wr = await getWorldRankDisplay(data.host);
         const mana = Math.floor(Math.random() * 251) + 50;
         
@@ -282,7 +297,8 @@ io.on('connection', (socket) => {
                 id: socket.id, name: data.host, slot: 0, ...CORNERS[0], 
                 mana, rankLabel: getFullRankLabel(mana), worldRankLabel: wr.label, 
                 alive: true, confirmed: false, color: PLAYER_COLORS[0], isAI: false, quit: false, powerUp: null,
-                isAdmin: (data.host === ADMIN_NAME), turnsWithoutBattle: 0, turnsWithoutPvP: 0, isStunned: false, stunDuration: 0
+                isAdmin: (data.host === ADMIN_NAME), turnsWithoutBattle: 0, turnsWithoutPvP: 0, isStunned: false, stunDuration: 0,
+                skin: data.skin || null
             }],
             world: {},
             afkTimer: null
@@ -290,7 +306,7 @@ io.on('connection', (socket) => {
         socket.join(id);
         io.to(id).emit('waitingRoomUpdate', rooms[id]);
         socket.emit('playMusic', 'waiting.mp3');
-        syncAllGates();
+        syncAllMonoliths();
     });
 
     socket.on('joinGate', async (data) => {
@@ -304,12 +320,13 @@ io.on('connection', (socket) => {
                 id: socket.id, name: data.user, slot, ...CORNERS[slot],
                 mana, rankLabel: getFullRankLabel(mana), worldRankLabel: wr.label,
                 alive: true, confirmed: false, color: PLAYER_COLORS[slot], isAI: false, quit: false, powerUp: null,
-                isAdmin: (data.user === ADMIN_NAME), turnsWithoutBattle: 0, turnsWithoutPvP: 0, isStunned: false, stunDuration: 0
+                isAdmin: (data.user === ADMIN_NAME), turnsWithoutBattle: 0, turnsWithoutPvP: 0, isStunned: false, stunDuration: 0,
+                skin: data.skin || null
             });
             socket.join(data.gateID);
             io.to(data.gateID).emit('waitingRoomUpdate', r);
             socket.emit('playMusic', 'waiting.mp3');
-            syncAllGates();
+            syncAllMonoliths();
         }
     });
 
@@ -335,10 +352,10 @@ io.on('connection', (socket) => {
             turn: 0, currentRoundMoves: 0, round: 1, spawnCounter: 0, 
             survivorTurns: 0, respawnHappened: false, currentBattle: null,
             players: [
-                { id: socket.id, name: data.user, slot: 0, ...CORNERS[0], mana, rankLabel: getFullRankLabel(mana), alive: true, isAI: false, color: PLAYER_COLORS[0], quit: false, powerUp: null, isAdmin: (data.user === ADMIN_NAME), turnsWithoutBattle: 0, turnsWithoutPvP: 0, isStunned: false, stunDuration: 0 },
-                { id: 'ai1', name: AI_NAMES[1], slot: 1, ...CORNERS[1], mana: 200, rankLabel: "Lower D-Rank", alive: true, isAI: true, color: PLAYER_COLORS[1], quit: false, powerUp: null, turnsWithoutBattle: 0, turnsWithoutPvP: 0, isStunned: false, stunDuration: 0 },
-                { id: 'ai2', name: AI_NAMES[2], slot: 2, ...CORNERS[2], mana: 233, rankLabel: "Higher D-Rank", alive: true, isAI: true, color: PLAYER_COLORS[2], quit: false, powerUp: null, turnsWithoutBattle: 0, turnsWithoutPvP: 0, isStunned: false, stunDuration: 0 },
-                { id: 'ai3', name: AI_NAMES[3], slot: 3, ...CORNERS[3], mana: 200, rankLabel: "Lower D-Rank", alive: true, isAI: true, color: PLAYER_COLORS[3], quit: false, powerUp: null, turnsWithoutBattle: 0, turnsWithoutPvP: 0, isStunned: false, stunDuration: 0 }
+                { id: socket.id, name: data.user, slot: 0, ...CORNERS[0], mana, rankLabel: getFullRankLabel(mana), alive: true, isAI: false, color: PLAYER_COLORS[0], quit: false, powerUp: null, isAdmin: (data.user === ADMIN_NAME), turnsWithoutBattle: 0, turnsWithoutPvP: 0, isStunned: false, stunDuration: 0, skin: data.skin || null },
+                { id: 'ai1', name: AI_NAMES[1], slot: 1, ...CORNERS[1], mana: 200, rankLabel: "Lower D-Rank", alive: true, isAI: true, color: PLAYER_COLORS[1], quit: false, powerUp: null, turnsWithoutBattle: 0, turnsWithoutPvP: 0, isStunned: false, stunDuration: 0, skin: null },
+                { id: 'ai2', name: AI_NAMES[2], slot: 2, ...CORNERS[2], mana: 233, rankLabel: "Higher D-Rank", alive: true, isAI: true, color: PLAYER_COLORS[2], quit: false, powerUp: null, turnsWithoutBattle: 0, turnsWithoutPvP: 0, isStunned: false, stunDuration: 0, skin: null },
+                { id: 'ai3', name: AI_NAMES[3], slot: 3, ...CORNERS[3], mana: 200, rankLabel: "Lower D-Rank", alive: true, isAI: true, color: PLAYER_COLORS[3], quit: false, powerUp: null, turnsWithoutBattle: 0, turnsWithoutPvP: 0, isStunned: false, stunDuration: 0, skin: null }
             ],
             world: {},
             afkTimer: null
@@ -395,7 +412,7 @@ io.on('connection', (socket) => {
 
 function startGame(room) {
     room.active = true;
-    for(let i=0; i<5; i++) spawnGate(room);
+    for(let i=0; i<5; i++) spawnMonolith(room);
     io.to(room.id).emit('gameStart', { roomId: room.id });
     io.to(room.id).emit('playMusic', 'gameplay.mp3');
     broadcastGameState(room);
@@ -407,33 +424,33 @@ function processMove(room, player, tx, ty) {
     player.y = ty;
 
     const enemy = room.players.find(other => other.id !== player.id && other.alive && other.x === tx && other.y === ty);
-    const gateKey = `${tx}-${ty}`;
-    const gate = room.world[gateKey];
+    const monolithKey = `${tx}-${ty}`;
+    const monolith = room.world[monolithKey];
 
-    if (enemy || gate) {
-        room.currentBattle = { attacker: player.id, defender: enemy ? enemy.id : 'gate' };
+    if (enemy || monolith) {
+        room.currentBattle = { attacker: player.id, defender: enemy ? enemy.id : 'monolith' };
         broadcastGameState(room); 
 
         io.to(room.id).emit('battleStart', {
             hunter: player.name, hunterColor: player.color, hunterMana: player.mana,
-            target: enemy ? enemy.name : (gate.rank === 'Silver' ? "SILVER MONARCH" : `RANK ${gate.rank}`),
-            targetColor: enemy ? enemy.color : gate.color, targetRank: `MP: ${enemy ? enemy.mana : gate.mana}`
+            target: enemy ? enemy.name : (monolith.rank === 'Eagle' ? "SILVER EAGLE" : `MONOLITH ${monolith.rank}`),
+            targetColor: enemy ? enemy.color : monolith.color, targetRank: `MP: ${enemy ? enemy.mana : monolith.mana}`
         });
 
         setTimeout(() => {
-            resolveBattle(room, player, enemy || gate, !!gate);
+            resolveBattle(room, player, enemy || monolith, !!monolith);
         }, 5000);
     } else {
         finishTurn(room);
     }
 }
 
-function resolveBattle(room, attacker, defender, isGate) {
+function resolveBattle(room, attacker, defender, isMonolith) {
     if(!room.active) return;
     room.currentBattle = null;
     
     attacker.turnsWithoutBattle = 0;
-    if(!isGate) {
+    if(!isMonolith) {
         attacker.turnsWithoutPvP = 0;
         defender.turnsWithoutBattle = 0;
         defender.turnsWithoutPvP = 0;
@@ -444,7 +461,7 @@ function resolveBattle(room, attacker, defender, isGate) {
     let swapper = null;
 
     if (attacker.activeBuff === 'SOUL SWAP') swapper = attacker;
-    else if (!isGate && defender.activeBuff === 'SOUL SWAP') swapper = defender;
+    else if (!isMonolith && defender.activeBuff === 'SOUL SWAP') swapper = defender;
 
     if (swapper) {
         const victims = room.players.filter(p => p.alive && !p.quit && p.id !== attacker.id && p.id !== defender.id);
@@ -458,7 +475,7 @@ function resolveBattle(room, attacker, defender, isGate) {
             io.to(room.id).emit('announcement', `${swapper.name}'s SOUL SWAP failed! No targets.`);
             swapper = null; 
             attacker.activeBuff = null; 
-            if(!isGate) defender.activeBuff = null;
+            if(!isMonolith) defender.activeBuff = null;
         }
     }
 
@@ -468,26 +485,26 @@ function resolveBattle(room, attacker, defender, isGate) {
     let autoWin = false;
 
     if (battleAttacker.activeBuff === 'DOUBLE DAMAGE') attMana *= 2;
-    if (battleAttacker.activeBuff === 'RULERS POWER' && (!isGate || battleDefender.rank !== 'Silver')) autoWin = true;
+    if (battleAttacker.activeBuff === 'RULERS POWER' && (!isMonolith || battleDefender.rank !== 'Eagle')) autoWin = true;
     if (battleAttacker.activeBuff === 'AIR WALK') { cancel = true; teleport(battleAttacker); }
     
-    if(!isGate) {
+    if(!isMonolith) {
         if(battleDefender.activeBuff === 'DOUBLE DAMAGE') defMana *= 2;
         if(battleDefender.activeBuff === 'RULERS POWER') defMana = 99999999;
         if(battleDefender.activeBuff === 'AIR WALK') { cancel = true; teleport(battleDefender); }
     }
     
     if(battleAttacker.id !== (swapper?.id)) battleAttacker.activeBuff = null;
-    if(!isGate && battleDefender.id !== (swapper?.id)) battleDefender.activeBuff = null;
+    if(!isMonolith && battleDefender.id !== (swapper?.id)) battleDefender.activeBuff = null;
 
     let loser = null;
 
     if(!cancel) {
         if(autoWin || attMana >= defMana) {
             battleAttacker.mana += battleDefender.mana;
-            if(isGate) {
+            if(isMonolith) {
                 delete room.world[`${attacker.x}-${attacker.y}`];
-                if(battleDefender.rank === 'Silver') return handleWin(room, battleAttacker.name);
+                if(battleDefender.rank === 'Eagle') return handleWin(room, battleAttacker.name);
                 if(!battleAttacker.powerUp && Math.random() < 0.2) {
                     battleAttacker.powerUp = POWER_UPS[Math.floor(Math.random() * POWER_UPS.length)];
                     // Send to attacker only (even if AI - effectively hidden)
@@ -498,7 +515,7 @@ function resolveBattle(room, attacker, defender, isGate) {
                 loser = battleDefender;
             }
         } else {
-            if(!isGate) battleDefender.mana += battleAttacker.mana;
+            if(!isMonolith) battleDefender.mana += battleAttacker.mana;
             battleAttacker.alive = false;
             loser = battleAttacker;
         }
@@ -512,21 +529,21 @@ function resolveBattle(room, attacker, defender, isGate) {
     }
 
     io.to(room.id).emit('battleEnd');
-    checkSilverMonarchCondition(room);
+    checkEagleCondition(room);
     finishTurn(room);
 }
 
-function checkSilverMonarchCondition(room) {
+function checkEagleCondition(room) {
     if (!room.active) return;
     const aliveTotal = room.players.filter(p => p.alive); 
     if (aliveTotal.length === 1) {
-        const silverGate = Object.values(room.world).find(g => g.rank === 'Silver');
-        if(!silverGate) {
+        const eagleMonolith = Object.values(room.world).find(g => g.rank === 'Eagle');
+        if(!eagleMonolith) {
             let sx, sy;
             do { sx=rInt(15); sy=rInt(15); } while(room.players.some(p=>p.x===sx && p.y===sy) || room.world[`${sx}-${sy}`]);
             const smMana = Math.floor(Math.random() * (17000 - 1500 + 1)) + 1500;
-            room.world[`${sx}-${sy}`] = { rank: 'Silver', color: '#fff', mana: smMana };
-            io.to(room.id).emit('announcement', `THE MONARCH HAS DESCENDED! DEFEAT IT IN 4 TURNS!`);
+            room.world[`${sx}-${sy}`] = { rank: 'Eagle', color: '#fff', mana: smMana };
+            io.to(room.id).emit('announcement', `THE SILVER EAGLE HAS DESCENDED! DEFEAT IT IN 4 TURNS!`);
             room.survivorTurns = 0;
         }
     } 
@@ -563,13 +580,13 @@ function finishTurn(room) {
         room.round++;
         if (room.round % 3 === 0) {
             room.spawnCounter++;
-            for(let i=0; i<(3 + rInt(3)); i++) spawnGate(room);
+            for(let i=0; i<(3 + rInt(3)); i++) spawnMonolith(room);
         }
     }
 
-    const silverGate = Object.values(room.world).find(g => g.rank === 'Silver');
+    const eagleMonolith = Object.values(room.world).find(g => g.rank === 'Eagle');
     const alive = room.players.filter(p => p.alive);
-    if (silverGate && alive.length === 1) {
+    if (eagleMonolith && alive.length === 1) {
         room.survivorTurns++;
         if (room.survivorTurns >= 5) { triggerRespawn(room, alive[0].id); return; }
     }
@@ -626,7 +643,7 @@ function handleWin(room, winnerName) {
     });
 
     broadcastWorldRankings();
-    setTimeout(() => { io.to(room.id).emit('returnToProfile'); delete rooms[room.id]; syncAllGates(); }, 6000);
+    setTimeout(() => { io.to(room.id).emit('returnToProfile'); delete rooms[room.id]; syncAllMonoliths(); }, 6000);
 }
 
 function handleDisconnect(socket, isQuit) {
@@ -641,7 +658,7 @@ function handleDisconnect(socket, isQuit) {
                 if (room.players.length === 0) delete rooms[room.id];
                 else io.to(room.id).emit('waitingRoomUpdate', room);
             }
-            syncAllGates();
+            syncAllMonoliths();
             const u = Object.keys(connectedUsers).find(key => connectedUsers[key] === socket.id);
             if(u) delete connectedUsers[u];
             return;
@@ -658,11 +675,11 @@ function handleDisconnect(socket, isQuit) {
             socket.emit('returnToProfile'); 
             const activeHumans = room.players.filter(pl => !pl.quit && !pl.isAI);
             if(room.isOnline && activeHumans.length === 1) { handleWin(room, activeHumans[0].name); return; }
-            if(!room.isOnline) { delete rooms[room.id]; syncAllGates(); return; }
+            if(!room.isOnline) { delete rooms[room.id]; syncAllMonoliths(); return; }
             if(p === room.players[room.turn]) finishTurn(room);
         }
         if(room.players.filter(pl => !pl.quit && !pl.isAI).length === 0) delete rooms[room.id]; 
-        syncAllGates();
+        syncAllMonoliths();
     }
     const u = Object.keys(connectedUsers).find(key => connectedUsers[key] === socket.id);
     if(u) delete connectedUsers[u];
@@ -698,11 +715,11 @@ function triggerRespawn(room, survivorId) {
         return;
     }
     
-    for(let i=0; i<5; i++) spawnGate(room);
+    for(let i=0; i<5; i++) spawnMonolith(room);
     finishTurn(room);
 }
 
-function spawnGate(room) {
+function spawnMonolith(room) {
     let sx, sy;
     do { sx=rInt(15); sy=rInt(15); } while(room.players.some(p=>p.x===sx && p.y===sy) || room.world[`${sx}-${sy}`]);
     let tiers = room.respawnHappened ? ['S', 'A'] : (room.spawnCounter <= 3 ? ['E', 'D'] : (room.spawnCounter <= 5 ? ['E', 'D', 'C', 'B'] : ['A', 'B', 'C', 'D', 'E']));
@@ -718,10 +735,10 @@ function runAIMove(room, ai) {
     let minDist = 999;
     const range = getMoveRange(ai.mana);
 
-    // 1. SILVER MONARCH (Priority)
-    const silverKey = Object.keys(room.world).find(k => room.world[k].rank === 'Silver');
-    if (silverKey) {
-         const [sx, sy] = silverKey.split('-').map(Number);
+    // 1. SILVER EAGLE (Priority)
+    const eagleKey = Object.keys(room.world).find(k => room.world[k].rank === 'Eagle');
+    if (eagleKey) {
+         const [sx, sy] = eagleKey.split('-').map(Number);
          target = {x: sx, y: sy};
     }
 
@@ -736,7 +753,7 @@ function runAIMove(room, ai) {
         }
     }
 
-    // 3. FARM GATES
+    // 3. FARM MONOLITHS
     if (!target) {
         minDist = 999;
         for(const key in room.world) {
@@ -752,9 +769,6 @@ function runAIMove(room, ai) {
         const dy = target.y - ai.y;
         
         // --- STRICT PLAYER MOVEMENT LOGIC (ZIG-ZAG) ---
-        // Players can only move 1 step diagonally. To cross distance, they use Cardinal moves.
-        // We prioritize the axis with the larger distance.
-        
         // 1. If we are perfectly diagonal and 1 step away, take the 1 allowed diagonal step
         if (Math.abs(dx) === 1 && Math.abs(dy) === 1) {
              tx += dx;
@@ -782,9 +796,9 @@ function runAIMove(room, ai) {
     // --- AI POWER UP USAGE ---
     if (ai.powerUp) {
         const enemy = room.players.find(p => p.alive && p.x === tx && p.y === ty && p.id !== ai.id);
-        const gate = room.world[`${tx}-${ty}`];
+        const monolith = room.world[`${tx}-${ty}`];
 
-        if (enemy || gate) {
+        if (enemy || monolith) {
             let activate = false;
             if (ai.powerUp === 'RULERS POWER') activate = true;
             else if (ai.powerUp === 'DOUBLE DAMAGE') activate = true;
@@ -822,6 +836,8 @@ async function broadcastGameState(room) {
             // Admin sees '?' if powerup exists. Player sees their own actual powerup.
             powerUp: (pl.id === socket.id) ? pl.powerUp : (isSocketAdmin && pl.powerUp ? '?' : null),
             
+            // Ensures active skins are sent over the socket to render for all players
+            skin: pl.skin, 
             displayRank: getDisplayRank(pl.mana)
         }));
 
