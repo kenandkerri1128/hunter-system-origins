@@ -55,6 +55,18 @@ const RANK_COLORS = {
 const POWER_UPS = ['DOUBLE DAMAGE', 'AIR WALK', 'SOUL SWAP', 'RULERS POWER'];
 const CORNERS = [{x:0,y:0}, {x:14,y:0}, {x:0,y:14}, {x:14,y:14}];
 
+// --- RANK UNLOCK LOGIC ---
+function getRankUnlockedItems(mana) {
+    let unlocked = [];
+    if (mana >= 101) unlocked.push('skin:char_knight.png'); // Rank D
+    if (mana >= 301) unlocked.push('skin:char_calvary.png'); // Rank C
+    if (mana >= 501) unlocked.push('skin:char_assasin.png'); // Rank B
+    if (mana >= 701) unlocked.push('skin:char_sniper.png', 'eagle:eagle_premium.png'); // Rank A
+    if (mana >= 901) unlocked.push('skin:char_speargirl.png', 'bg:hunterseige_bg.png'); // Rank S
+    if (mana >= 1000) unlocked.push('skin:char_main char.png', 'music:Pixel Parlor Lounge.mp3'); // Rank S+
+    return unlocked;
+}
+
 // --- DATABASE HELPERS ---
 async function dbUpdateHunter(username, points, isWin) {
     try {
@@ -143,7 +155,6 @@ function syncAllMonoliths() {
     const list = Object.values(rooms).filter(r => r.isOnline && !r.active).map(r => ({ id: r.id, name: r.name, count: r.players.length }));
     io.emit('updateGateList', list); 
 
-    // ADMIN UPDATE: Send active rooms specifically to the admin for easy spectating
     if (adminSocketId) {
         const activeRooms = Object.values(rooms).filter(r => r.active).map(r => ({
             id: r.id,
@@ -181,13 +192,35 @@ function getAllVaultItems() {
             if(f.endsWith('.mp3') || f.endsWith('.wav')) items.push(`music:${f}`);
         });
     }
+
+    // Force Rank Items to the very top of the list
+    const PRIORITY_ITEMS = [
+        'skin:char_knight.png',
+        'skin:char_calvary.png',
+        'skin:char_assasin.png',
+        'skin:char_sniper.png',
+        'eagle:eagle_premium.png',
+        'skin:char_speargirl.png',
+        'bg:hunterseige_bg.png',
+        'skin:char_main char.png',
+        'music:Pixel Parlor Lounge.mp3'
+    ];
+
+    items.sort((a, b) => {
+        const indexA = PRIORITY_ITEMS.indexOf(a);
+        const indexB = PRIORITY_ITEMS.indexOf(b);
+        if (indexA !== -1 && indexB !== -1) return indexA - indexB;
+        if (indexA !== -1) return -1;
+        if (indexB !== -1) return 1;
+        return a.localeCompare(b);
+    });
+
     return items;
 }
 
 // --- SOCKET LOGIC ---
 io.on('connection', (socket) => {
     
-    // SECURITY: Initialize individual socket cooldowns
     socket.lastMsgTime = 0;
     socket.lastGateTime = 0;
 
@@ -200,6 +233,22 @@ io.on('connection', (socket) => {
         }
         connectedDevices[deviceId] = socket.id;
     }
+
+    // Refresh Inventory on Demand (So players see unlocks immediately after gaining HuP)
+    socket.on('requestInventoryUpdate', async (username) => {
+        try {
+            const { data: user } = await supabase.from('Hunters').select('hunterpoints, inventory, active_cosmetics').eq('username', username).single();
+            if (user) {
+                const rankItems = getRankUnlockedItems(user.hunterpoints);
+                const totalOwned = [...new Set([...(user.inventory || []), ...rankItems])];
+                socket.emit('inventoryUpdate', { 
+                    inventory: getAllVaultItems(), 
+                    ownedItems: totalOwned,
+                    activeCosmetics: user.active_cosmetics 
+                });
+            }
+        } catch(e) {}
+    });
 
     socket.on('requestAdminVault', () => {
         if (socket.id !== adminSocketId) return;
@@ -251,11 +300,13 @@ io.on('connection', (socket) => {
                         
                         const targetSocketId = connectedUsers[data.target];
                         if (targetSocketId) {
-                            const { data: freshUser } = await supabase.from('Hunters').select('inventory, active_cosmetics').eq('username', data.target).single();
+                            const { data: freshUser } = await supabase.from('Hunters').select('hunterpoints, inventory, active_cosmetics').eq('username', data.target).single();
+                            const rankItems = getRankUnlockedItems(freshUser.hunterpoints);
+                            const totalOwned = [...new Set([...(freshUser.inventory || []), ...rankItems])];
                             
                             io.to(targetSocketId).emit('inventoryUpdate', { 
                                 inventory: getAllVaultItems(), 
-                                ownedItems: freshUser.inventory || [],
+                                ownedItems: totalOwned,
                                 activeCosmetics: freshUser.active_cosmetics 
                             });
                             
@@ -269,7 +320,6 @@ io.on('connection', (socket) => {
     });
 
     socket.on('authRequest', async (data) => {
-        // SECURITY: Validate auth data structure
         if (!data || typeof data.u !== 'string' || typeof data.p !== 'string') return;
 
         if (connectedUsers[data.u]) {
@@ -316,13 +366,16 @@ io.on('connection', (socket) => {
             const startingMusic = user.active_cosmetics?.music || (reconnected ? null : 'menu.mp3');
             if (startingMusic) socket.emit('playMusic', startingMusic);
 
+            const rankItems = getRankUnlockedItems(user.hunterpoints);
+            const totalOwned = [...new Set([...(user.inventory || []), ...rankItems])];
+
             socket.emit('authSuccess', { 
                 username: user.username, mana: user.hunterpoints, 
                 rank: getFullRankLabel(user.hunterpoints), color: RANK_COLORS[letter],
                 wins: user.wins||0, losses: user.losses||0, worldRank: (count||0)+1,
                 isAdmin: (user.username === ADMIN_NAME), music: null, 
                 inventory: getAllVaultItems(), 
-                ownedItems: user.inventory || [], 
+                ownedItems: totalOwned, 
                 activeCosmetics: user.active_cosmetics || {}
             });
             
@@ -337,12 +390,15 @@ io.on('connection', (socket) => {
         if (!data || !data.username || !data.type || !data.item) return;
 
         try {
-            const { data: user } = await supabase.from('Hunters').select('inventory, active_cosmetics').eq('username', data.username).single();
+            const { data: user } = await supabase.from('Hunters').select('hunterpoints, inventory, active_cosmetics').eq('username', data.username).single();
             const invString = `${data.type}:${data.item}`;
             
             const isAdmin = (data.username === ADMIN_NAME);
             
-            if (isAdmin || (user && (user.inventory || []).includes(invString))) {
+            const rankItems = user ? getRankUnlockedItems(user.hunterpoints) : [];
+            const totalOwned = [...new Set([...(user ? user.inventory || [] : []), ...rankItems])];
+
+            if (isAdmin || totalOwned.includes(invString)) {
                 let cosmetics = user.active_cosmetics || {};
                 if (cosmetics[data.type] === data.item) cosmetics[data.type] = null;
                 else cosmetics[data.type] = data.item;
@@ -351,7 +407,7 @@ io.on('connection', (socket) => {
                 
                 socket.emit('inventoryUpdate', { 
                     inventory: getAllVaultItems(), 
-                    ownedItems: user.inventory || [],
+                    ownedItems: totalOwned,
                     activeCosmetics: cosmetics 
                 });
 
@@ -376,7 +432,7 @@ io.on('connection', (socket) => {
                     }
                 }
             } else {
-                socket.emit('announcement', `SYSTEM: ITEM LOCKED. YOU MUST BUY OR BE GRANTED THIS ITEM.`);
+                socket.emit('announcement', `SYSTEM: ITEM LOCKED. YOU MUST BUY OR REACH THE REQUIRED RANK TO UNLOCK.`);
             }
         } catch(e) { console.error(e); }
     });
@@ -395,15 +451,14 @@ io.on('connection', (socket) => {
     });
 
     socket.on('sendMessage', (data) => {
-        // SECURITY: Rate Limiting & Input Validation
         const now = Date.now();
-        if (now - socket.lastMsgTime < 1000) { // 1 second cooldown
+        if (now - socket.lastMsgTime < 1000) { 
             return socket.emit('announcement', 'SYSTEM: You are sending messages too fast.');
         }
         socket.lastMsgTime = now;
 
         if (!data || typeof data.message !== 'string') return;
-        const safeMessage = data.message.substring(0, 200); // Prevent massive text spam
+        const safeMessage = data.message.substring(0, 200); 
 
         const payload = { sender: data.senderName, text: safeMessage, rank: data.rank, timestamp: new Date().toLocaleTimeString(), isAdmin: (data.senderName === ADMIN_NAME) };
         if (data.senderName === ADMIN_NAME && data.roomId === 'global') io.emit('receiveMessage', payload);
@@ -414,9 +469,8 @@ io.on('connection', (socket) => {
     socket.on('requestWorldRankings', () => broadcastWorldRankings(socket));
 
     socket.on('createGate', async (data) => {
-        // SECURITY: Rate Limiting
         const now = Date.now();
-        if (now - socket.lastGateTime < 5000) { // 5 second cooldown
+        if (now - socket.lastGateTime < 5000) { 
             return socket.emit('announcement', 'SYSTEM: Please wait before opening another Gate.');
         }
         socket.lastGateTime = now;
@@ -521,9 +575,8 @@ io.on('connection', (socket) => {
     });
 
     socket.on('playerAction', (data) => {
-        // SECURITY: Input Validation for Grid Coordinates
         if (!data || typeof data.tx !== 'number' || typeof data.ty !== 'number') return;
-        if (data.tx < 0 || data.tx > 14 || data.ty < 0 || data.ty > 14) return; // Grid boundary check
+        if (data.tx < 0 || data.tx > 14 || data.ty < 0 || data.ty > 14) return; 
 
         const r = Object.values(rooms).find(rm => rm.players.some(p => p.id === socket.id));
         if(!r || !r.active || r.processing) return; 
