@@ -698,7 +698,15 @@ function resolveBattle(room, attacker, defender, isMonolith) {
             if(isMonolith) {
                 delete room.world[`${attacker.x}-${attacker.y}`];
                 if(bDef.rank === 'Eagle') return handleWin(room, bAtt.name);
-                if(!bAtt.powerUp && Math.random() < 0.2) {
+                
+                // NEW: Calculate the top 2 weakest living players. If the attacker is one of them, give +5% drop chance.
+                let pChance = 0.20;
+                const aliveSorted = room.players.filter(p => p.alive && !p.quit).sort((a, b) => a.mana - b.mana);
+                if (aliveSorted.length > 0 && (bAtt.id === aliveSorted[0].id || (aliveSorted.length > 1 && bAtt.id === aliveSorted[1].id))) {
+                    pChance = 0.25;
+                }
+
+                if(!bAtt.powerUp && Math.random() < pChance) {
                     bAtt.powerUp = POWER_UPS[Math.floor(Math.random() * POWER_UPS.length)];
                     io.to(bAtt.id).emit('announcement', `OBTAINED RUNE: ${bAtt.powerUp}`);
                 }
@@ -841,15 +849,33 @@ function handleDisconnect(socket, isQuit) {
 
 function triggerRespawn(room, sid) {
     io.to(room.id).emit('announcement', "REAWAKENING PROTOCOL...");
-    room.respawnHappened = true; room.world = {}; 
-    room.players.forEach(p => { if(!p.quit) { p.alive = true; teleport(p); p.mana += 500; } });
-    for(let i=0; i<5; i++) spawnMonolith(room);
+    room.respawnHappened = true; 
+    room.survivorTurns = 0;
+    
+    for (const key in room.world) {
+        if (room.world[key].rank === 'Eagle') {
+            delete room.world[key];
+        }
+    }
+
+    room.players.forEach(p => { 
+        if(!p.quit) { 
+            p.alive = true; 
+            teleport(p); 
+            p.mana += 500; 
+            p.turnsWithoutBattle = 0;
+            p.turnsWithoutPvP = 0;
+            p.isStunned = false;
+            p.stunDuration = 0;
+        } 
+    });
+    
     finishTurn(room);
 }
 
 function spawnMonolith(room) {
     let sx, sy; do { sx=rInt(15); sy=rInt(15); } while(room.players.some(p=>p.x===sx && p.y===sy) || room.world[`${sx}-${sy}`]);
-    let tiers = room.respawnHappened ? ['S', 'A'] : (room.spawnCounter <= 3 ? ['E', 'D'] : (room.spawnCounter <= 5 ? ['E', 'D', 'C', 'B'] : ['A', 'B', 'C', 'D', 'E']));
+    let tiers = room.spawnCounter <= 3 ? ['E', 'D'] : (room.spawnCounter <= 5 ? ['E', 'D', 'C', 'B'] : ['A', 'B', 'C', 'D', 'E']);
     const rank = tiers[rInt(tiers.length)];
     const range = { 'E':[10,100], 'D':[101,200], 'C':[201,400], 'B':[401,600], 'A':[601,900], 'S':[901,1500] }[rank];
     room.world[`${sx}-${sy}`] = { rank, color: RANK_COLORS[rank], mana: rInt(range[1]-range[0]) + range[0] };
@@ -943,4 +969,3 @@ async function broadcastGameState(room) {
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => console.log(`SYSTEM: ONLINE ON PORT ${PORT}`));
-
