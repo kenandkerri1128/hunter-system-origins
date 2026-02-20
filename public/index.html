@@ -311,12 +311,22 @@
                 </div>
             </div>
 
-            <div class="menu-section" style="flex: 1; text-align: right;">
-                <h1 id="p-name" style="font-size: 2rem;">---</h1>
-                <div id="p-wr" style="color: var(--sys-gold); font-weight: 900; font-size: 1rem;">WORLD RANK #--</div>
-                <div id="p-rank" style="font-size: 1.2rem; margin: 5px 0;">---</div>
-                <div id="p-stats" style="color: #888; font-size: 0.9rem;">W: 0 | L: 0</div>
-                <div id="p-mp" style="color: var(--sys-blue); font-size: 1rem; margin-bottom: 20px;">HuP: ---</div>
+            <div class="menu-section" style="flex: 1;">
+                
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 10px;">
+                    <div id="p-badge-container" style="display: flex; flex-direction: column; align-items: center; justify-content: center;">
+                        <img id="p-badge-img" src="" style="width: 120px; height: 120px; object-fit: contain; filter: drop-shadow(0 0 15px var(--sys-blue));">
+                        <div id="p-badge-name" style="margin-top: 10px; font-family: 'Orbitron'; font-weight: 900; letter-spacing: 1px; font-size: 0.85rem; text-transform: uppercase; text-align: center;">INITIALIZING...</div>
+                    </div>
+                    
+                    <div style="text-align: right; flex-grow: 1;">
+                        <h1 id="p-name" style="font-size: 2rem; margin: 0;">---</h1>
+                        <div id="p-wr" style="color: var(--sys-gold); font-weight: 900; font-size: 1rem;">WORLD RANK #--</div>
+                        <div id="p-rank" style="font-size: 1.2rem; margin: 5px 0;">---</div>
+                        <div id="p-stats" style="color: #888; font-size: 0.9rem;">W: 0 | L: 0</div>
+                        <div id="p-mp" style="color: var(--sys-blue); font-size: 1rem;">HuP: ---</div>
+                    </div>
+                </div>
 
                 <div id="admin-controls" style="display:none; flex-direction:column; gap:5px; margin-bottom: 20px; width: 100%;">
                     <input id="adm-kick" class="sys-input" style="width:100%; padding: 5px; font-size: 0.8rem;" placeholder="Kick Username">
@@ -525,6 +535,33 @@
             document.getElementById('p-mp').innerText = `HuP: ${d.mana}`;
             document.getElementById('p-stats').innerText = `W: ${d.wins || 0} | L: ${d.losses || 0}`;
             document.getElementById('p-wr').innerText = `WORLD RANK #${d.worldRank || '--'}`;
+
+            // --- BADGE SYSTEM LOGIC ---
+            const badgeData = {
+                'E': { title: 'Beginner Hunter', file: 'badge_E.png' },
+                'D': { title: 'Novice Hunter', file: 'badge_D.png' },
+                'C': { title: 'Elite Hunter', file: 'badge_C.png' },
+                'B': { title: 'Veteran Hunter', file: 'badge_B.png' },
+                'A': { title: 'Super Hunter', file: 'badge_A.png' },
+                'S': { title: 'Master Hunter', file: 'badge_S.png' },
+                'S+': { title: 'Lord of Hunters', file: 'badge_Splus.png' }
+            };
+
+            const rankInfo = getRankLetter(d.mana); 
+            let cleanLetter = rankInfo.letter.replace('-', '').replace('+', ''); 
+            if (rankInfo.letter === "S+") cleanLetter = "S+"; 
+
+            const currentBadge = badgeData[cleanLetter] || badgeData['E'];
+
+            const badgeImg = document.getElementById('p-badge-img');
+            const badgeName = document.getElementById('p-badge-name');
+            
+            badgeImg.src = `/uploads/badges/${currentBadge.file}`;
+            badgeImg.style.filter = `drop-shadow(0 0 15px ${rankInfo.color})`;
+            badgeName.innerText = currentBadge.title;
+            badgeName.style.color = rankInfo.color;
+            badgeName.style.textShadow = `0 0 10px ${rankInfo.color}`;
+            // ---------------------------
             
             if (d.isAdmin) {
                 document.getElementById('admin-controls').style.display = 'flex';
