@@ -10,7 +10,7 @@ const server = http.createServer(app);
 
 // CONNECTION URL
 const io = new Server(server, {
-    cors: { origin: "https://originmanaseige.onrender.com" },
+    cors: { origin: ["https://originmanaseige.onrender.com", "https://originmanaseige.onrender.com/"] },
     pingTimeout: 60000 
 });
 
@@ -606,7 +606,7 @@ function processMove(room, player, tx, ty) {
 
         setTimeout(() => {
             resolveBattle(room, player, enemy || monolith, !!monolith);
-        }, 5000);
+        }, 3000);
     } else {
         finishTurn(room);
     }
