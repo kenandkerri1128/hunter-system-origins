@@ -10,7 +10,7 @@ const server = http.createServer(app);
 
 // CONNECTION URL
 const io = new Server(server, {
-    cors: { origin: "*" },
+    cors: { origin: "https://originmanaseige.onrender.com" },
     pingTimeout: 60000 
 });
 
