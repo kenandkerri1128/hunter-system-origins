@@ -592,12 +592,23 @@ io.on('connection', (socket) => {
     });
 });
 
-// CORE LOGIC FUNCTIONS
+// --- CORE LOGIC FUNCTIONS ---
 function startGame(room) {
     room.active = true;
     for(let i=0; i<5; i++) spawnMonolith(room);
     io.to(room.id).emit('gameStart', { roomId: room.id });
     room.players.forEach(p => { if (!p.isAI && !p.activeCosmetics?.music) io.to(p.id).emit('playMusic', 'gameplay.mp3'); });
+    
+    // PVP FIX: Ensure the first player gets an AFK timer so the game doesn't stall immediately
+    const p1 = room.players[0];
+    if (!p1.isAI) {
+        room.afkTimer = setTimeout(() => {
+            const afkSocket = io.sockets.sockets.get(p1.id);
+            if (afkSocket) handleDisconnect(afkSocket, true);
+            else { p1.quit = true; p1.alive = false; finishTurn(room); }
+        }, 180000);
+    }
+    
     broadcastGameState(room);
     syncAllMonoliths();
 }
@@ -630,7 +641,7 @@ function resolveBattle(room, attacker, defender, isMonolith) {
     if (attacker.activeBuff === 'SOUL SWAP') swp = attacker;
     else if (!isMonolith && defender.activeBuff === 'SOUL SWAP') swp = defender;
 
-    // BUG 2 FIX: Protected Soul Swap crash against Monoliths
+    // FIX: Protected Soul Swap crash against Monoliths
     if (swp) {
         const victims = room.players.filter(p => p.alive && !p.quit && p.id !== attacker.id && p.id !== (isMonolith ? null : defender.id));
         if (victims.length > 0) {
@@ -692,7 +703,6 @@ function finishTurn(room) {
     if (room.afkTimer) { clearTimeout(room.afkTimer); room.afkTimer = null; }
     room.processing = false; 
     
-    // RESTORED: Exhaustion and Cowardice Mechanics
     const p = room.players[room.turn];
     if(p && p.alive) { 
         p.turnsWithoutBattle++; p.turnsWithoutPvP++; 
@@ -743,7 +753,7 @@ function finishTurn(room) {
     if (room.players.filter(pl => pl.alive && !pl.quit).length === 0) { triggerRespawn(room, null); return; }
     broadcastGameState(room);
     
-    // RESTORED BUG 1: Start the AI's turn if an AI is active
+    // RESTORED FIX: Starts the AI's turn if an AI is up next. This prevents the server from freezing!
     const nextP = room.players[room.turn];
     if(nextP.alive && nextP.isAI) setTimeout(() => runAIMove(room, nextP), 1000);
 }
@@ -762,7 +772,7 @@ function handleWin(room, winner) {
 }
 
 function handleDisconnect(socket, isQuit) {
-    if (!socket) return; // SECURITY FIX: Protect against undefined socket drops
+    if (!socket) return; 
     const room = Object.values(rooms).find(r => r.players.some(p => p.id === socket.id));
     if(room) {
         if(room.afkTimer) clearTimeout(room.afkTimer);
@@ -789,31 +799,112 @@ function triggerRespawn(room, sid) {
     finishTurn(room);
 }
 
+// RESTORED FIX: The correct Monolith scaling generation logic
 function spawnMonolith(room) {
-    let sx, sy; do { sx=rInt(15); sy=rInt(15); } while(room.players.some(p=>p.x===sx && p.y===sy) || room.world[`${sx}-${sy}`]);
-    const tiers = ['E', 'D', 'C', 'B', 'A', 'S'];
+    let sx, sy;
+    do { sx=rInt(15); sy=rInt(15); } while(room.players.some(p=>p.x===sx && p.y===sy) || room.world[`${sx}-${sy}`]);
+    let tiers = room.respawnHappened ? ['S', 'A'] : (room.spawnCounter <= 3 ? ['E', 'D'] : (room.spawnCounter <= 5 ? ['E', 'D', 'C', 'B'] : ['A', 'B', 'C', 'D', 'E']));
     const rank = tiers[rInt(tiers.length)];
-    room.world[`${sx}-${sy}`] = { rank, color: RANK_COLORS[rank], mana: rInt(500) + 100 };
+    const range = { 'E':[10,100], 'D':[101,200], 'C':[201,400], 'B':[401,600], 'A':[601,900], 'S':[901,1500] }[rank];
+    room.world[`${sx}-${sy}`] = { rank, color: RANK_COLORS[rank], mana: rInt(range[1]-range[0]) + range[0] };
+}
+
+// RESTORED FIX: The completely missing AI movement logic that caused the server crashes
+function runAIMove(room, ai) {
+    if(!room.active) return;
+    let target = null;
+    let minDist = 999;
+    const range = getMoveRange(ai.mana);
+
+    const eagleKey = Object.keys(room.world).find(k => room.world[k].rank === 'Eagle');
+    if (eagleKey) {
+         const [sx, sy] = eagleKey.split('-').map(Number);
+         target = {x: sx, y: sy};
+    }
+
+    if (!target) {
+        const killable = room.players.filter(p => p.id !== ai.id && p.alive && ai.mana >= p.mana);
+        if(killable.length > 0) {
+             for(const k of killable) {
+                 const dist = Math.abs(ai.x - k.x) + Math.abs(ai.y - k.y);
+                 if(dist < minDist) { minDist = dist; target = {x: k.x, y: k.y}; }
+             }
+        }
+    }
+
+    if (!target) {
+        minDist = 999;
+        for(const key in room.world) {
+            const [gx, gy] = key.split('-').map(Number);
+            const dist = Math.abs(ai.x - gx) + Math.abs(ai.y - gy);
+            if(ai.mana >= room.world[key].mana && dist < minDist) { minDist = dist; target = {x:gx, y:gy}; }
+        }
+    }
+
+    let tx = ai.x, ty = ai.y;
+    if(target) {
+        const dx = target.x - ai.x; 
+        const dy = target.y - ai.y;
+        
+        if (Math.abs(dx) === 1 && Math.abs(dy) === 1) {
+             tx += dx;
+             ty += dy;
+        } 
+        else {
+            if (Math.abs(dx) >= Math.abs(dy)) {
+                let stepX = (dx > 0) ? Math.min(dx, range) : Math.max(dx, -range);
+                tx += stepX;
+            } else {
+                let stepY = (dy > 0) ? Math.min(dy, range) : Math.max(dy, -range);
+                ty += stepY;
+            }
+        }
+    } else {
+        tx = Math.max(0, Math.min(14, ai.x + (Math.random() < 0.5 ? 1 : -1)));
+        ty = Math.max(0, Math.min(14, ai.y + (Math.random() < 0.5 ? 1 : -1)));
+    }
+
+    if (ai.powerUp) {
+        const enemy = room.players.find(p => p.alive && p.x === tx && p.y === ty && p.id !== ai.id);
+        const monolith = room.world[`${tx}-${ty}`];
+
+        if (enemy || monolith) {
+            let activate = false;
+            if (ai.powerUp === 'RULERS POWER') activate = true;
+            else if (ai.powerUp === 'DOUBLE DAMAGE') activate = true;
+            else if (ai.powerUp === 'SOUL SWAP' && ai.mana < 300) activate = true;
+
+            if (activate) {
+                ai.activeBuff = ai.powerUp;
+                ai.powerUp = null;
+                io.to(room.id).emit('announcement', `${ai.name} ACTIVATED ${ai.activeBuff}!`);
+            }
+        }
+    }
+
+    tx = Math.max(0, Math.min(14, tx)); ty = Math.max(0, Math.min(14, ty));
+    processMove(room, ai, tx, ty);
 }
 
 function teleport(p) { p.x = rInt(15); p.y = rInt(15); }
 function rInt(max) { return Math.floor(Math.random() * max); }
 
-// BUG 1 FIX: Stripped afkTimer entirely before emitting to prevent client freezing!
 async function broadcastGameState(room) {
-    const { afkTimer, hostCosmetics, ...safeRoom } = room; 
-    const sockets = await io.in(room.id).fetchSockets();
-    
-    for (const socket of sockets) {
-        const isAdm = (socket.id === adminSocketId);
-        const tp = safeRoom.players.find(p => p.id === socket.id);
-        const sanitized = safeRoom.players.map(pl => ({
-            ...pl, activeCosmetics: undefined, mana: (pl.id === socket.id || isAdm) ? pl.mana : null,
-            powerUp: (pl.id === socket.id) ? pl.powerUp : (isAdm && pl.powerUp ? '?' : null),
-            displayRank: getDisplayRank(pl.mana)
-        }));
-        socket.emit('gameStateUpdate', { ...safeRoom, players: sanitized, hostCosmetics: tp ? tp.activeCosmetics : {} });
-    }
+    try {
+        const { afkTimer, hostCosmetics, ...safeRoom } = room; 
+        const sockets = await io.in(room.id).fetchSockets();
+        
+        for (const socket of sockets) {
+            const isAdm = (socket.id === adminSocketId);
+            const tp = safeRoom.players.find(p => p.id === socket.id);
+            const sanitized = safeRoom.players.map(pl => ({
+                ...pl, activeCosmetics: undefined, mana: (pl.id === socket.id || isAdm) ? pl.mana : null,
+                powerUp: (pl.id === socket.id) ? pl.powerUp : (isAdm && pl.powerUp ? '?' : null),
+                displayRank: getDisplayRank(pl.mana)
+            }));
+            socket.emit('gameStateUpdate', { ...safeRoom, players: sanitized, hostCosmetics: tp ? tp.activeCosmetics : {} });
+        }
+    } catch(e) { console.error("Broadcast Error", e); }
 }
 
 const PORT = process.env.PORT || 3000;
