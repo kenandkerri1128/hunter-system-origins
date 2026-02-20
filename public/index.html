@@ -553,6 +553,18 @@
                 return;
             }
 
+            const unlockReqs = {
+                'char_knight.png': 'REACH RANK D',
+                'char_calvary.png': 'REACH RANK C',
+                'char_assasin.png': 'REACH RANK B',
+                'char_sniper.png': 'REACH RANK A',
+                'eagle_premium.png': 'REACH RANK A',
+                'char_speargirl.png': 'REACH RANK S',
+                'hunterseige_bg.png': 'REACH RANK S',
+                'char_main char.png': 'REACH RANK S+',
+                'Pixel Parlor Lounge.mp3': 'REACH RANK S+'
+            };
+
             itemsInTab.forEach(item => {
                 const invString = `${type}:${item}`;
                 const isOwned = myHunter.isAdmin || ownedItems.includes(invString);
@@ -562,17 +574,24 @@
                 box.style = `
                     width: 120px; height: 180px; display:flex; flex-direction:column; align-items:center; padding:5px; background: rgba(0,0,0,0.8); position: relative;
                     border: 2px solid ${isEquipped ? 'var(--sys-gold)' : (isOwned ? '#444' : '#222')};
-                    opacity: ${isOwned ? '1' : '0.5'};
+                    opacity: ${isOwned ? '1' : '0.6'};
                 `;
                 
                 let preview = '';
                 if (type === 'music') preview = `<div style="font-size:3rem; margin:auto;">🎵</div>`;
                 else {
                     let folder = (type === 'bg') ? 'bg' : 'skins';
-                    preview = `<img src="/uploads/${folder}/${item}" style="max-width:100%; max-height:80px; margin:auto; object-fit:contain; filter: ${isOwned ? 'none' : 'grayscale(100%) brightness(0.5)'};">`;
+                    preview = `<img src="/uploads/${folder}/${item}" style="max-width:100%; max-height:80px; margin:auto; object-fit:contain; filter: ${isOwned ? 'none' : 'grayscale(100%) brightness(0.3)'};">`;
                 }
 
-                let padlock = !isOwned ? `<div style="position:absolute; top:30%; font-size:2rem; text-shadow:0 0 10px black; z-index:5;">🔒</div>` : '';
+                let padlock = '';
+                if (!isOwned) {
+                    let reqMessage = unlockReqs[item] || 'VANGUARD / ADMIN';
+                    padlock = `
+                        <div style="position:absolute; top:35%; width: 100%; text-align: center; font-size:0.6rem; font-family:'Orbitron'; font-weight:900; color:var(--rank-s); text-shadow:0 0 5px black, 0 0 5px black; z-index:5; background: rgba(0,0,0,0.7); padding: 5px 0;">
+                            🔒<br>UNLOCK:<br>${reqMessage}
+                        </div>`;
+                }
 
                 let buttonLabel = "LOCKED";
                 let buttonClass = "";
@@ -593,7 +612,7 @@
                 box.innerHTML = `
                     ${padlock}
                     ${preview}
-                    <div style="font-size:0.6rem; margin-top:5px; word-break:break-all; text-align:center;">${item}</div>
+                    <div style="font-size:0.6rem; margin-top:5px; word-break:break-all; text-align:center;">${item.replace('.png','').replace('.mp3','')}</div>
                     ${buttonsHTML}
                 `;
                 grid.appendChild(box);
