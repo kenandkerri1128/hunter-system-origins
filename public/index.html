@@ -314,7 +314,7 @@
                 </div>
 
                 <div style="margin-top: auto; display: flex; flex-direction: column; gap: 10px; width: 100%;">
-                    <button class="sys-btn" style="width: 100%; border-color:var(--sys-gold); color:var(--sys-gold);" onclick="showScreen('screen-inventory'); renderInventory('skin');">VAULT (INVENTORY)</button>
+                    <button class="sys-btn" style="width: 100%; border-color:var(--sys-gold); color:var(--sys-gold);" onclick="socket.emit('requestInventoryUpdate', myHunter.username); showScreen('screen-inventory'); renderInventory('skin');">VAULT (INVENTORY)</button>
                     <button class="sys-btn gold" style="width: 100%;" onclick="startAI('Eagle')">EAGLE MODE (+5)</button>
                     <button class="sys-btn" style="width: 100%; border-color:var(--sys-blue); color:var(--sys-blue);" onclick="window.open('/guide.html', '_blank')">SYSTEM GUIDE</button>
                     <button class="sys-btn" style="width: 100%;" onclick="openOnlineLobby()">MULTIPLAYER</button>
@@ -429,7 +429,6 @@
     </div>
 
     <script>
-        // CHANGED: Socket connects directly to the new Render URL
         const RENDER_URL = "https://originmanaseige.onrender.com";
         const socket = io(RENDER_URL, { query: { deviceId: localStorage.getItem('hunter_device_id') || ('dev_' + Math.random().toString(36).substr(2, 9)) } });
 
@@ -539,7 +538,6 @@
             }
         }
 
-        // --- FULLY RESTORED VAULT RENDER LOGIC ---
         function renderInventory(type) {
             currentInvTab = type;
             const grid = document.getElementById('inv-grid');
@@ -790,7 +788,6 @@
         function quitAction() { socket.emit('quitGame'); currentGateID = null; document.getElementById('victory-screen').style.display = 'none'; showScreen('screen-menu'); }
         socket.on('returnToProfile', () => { currentGateID = null; document.getElementById('victory-screen').style.display = 'none'; showScreen('screen-menu'); document.getElementById('screen-game').style.backgroundImage = 'none';});
 
-        // --- FULL GAME STATE UPDATE (BOARD RENDERING) RESTORED ---
         socket.on('gameStateUpdate', (state) => {
             if (!state.active) return;
             currentGameState = state;
@@ -887,7 +884,6 @@
             const bar = document.getElementById('vs-bar');
             bar.style.transition = 'none';
             bar.style.width = '0%';
-            // CHANGED: Timed specifically for the new 3-second battle resolution window
             setTimeout(() => { bar.style.transition = 'width 2.8s linear'; bar.style.width = '100%'; }, 50);
         });
 
