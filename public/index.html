@@ -240,19 +240,28 @@
 
         /* --- GAME EFFECTS CSS --- */
         .hidden-effect { display: none; }
-        #clash-effect-container, #powerup-effect-container {
+        #clash-effect-container {
             position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
             z-index: 9999; pointer-events: none; text-align: center;
         }
+        #powerup-effect-container {
+            position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            z-index: 9999; pointer-events: none; text-align: center;
+            display: flex; gap: 40px; justify-content: center; align-items: center;
+        }
         #clash-animation { width: 300px; height: auto; filter: drop-shadow(0 0 10px white); }
         
-        #powerup-animation-icon {
+        .powerup-animation-icon {
             font-size: 150px; 
             filter: drop-shadow(0 0 20px var(--sys-gold));
         }
 
         .clash-active {
             display: block !important;
+            animation: fadeOutEffect 1s forwards;
+        }
+        .powerup-active {
+            display: flex !important;
             animation: fadeOutEffect 1s forwards;
         }
         @keyframes fadeOutEffect {
@@ -543,8 +552,7 @@
     </div>
 
     <div id="powerup-effect-container" class="hidden-effect">
-        <div id="powerup-animation-icon"></div>
-    </div>
+        </div>
 
     <script>
         const RENDER_URL = "https://originmanaseige.onrender.com";
@@ -571,8 +579,9 @@
                 
                 this.clashContainer = document.getElementById('clash-effect-container');
                 this.powerupContainer = document.getElementById('powerup-effect-container');
-                this.powerupIcon = document.getElementById('powerup-animation-icon');
                 this.eagleActive = false;
+                
+                this.powerupClearTimeout = null;
             }
             
             triggerCombatEffect() {
@@ -587,24 +596,37 @@
             }
             
             triggerPowerUpEffect(powerUpName) {
-                // Synthesize the sparkle sound natively
                 this.playSparkleSound();
                 
-                // Override/cancel the sword clash animation if it's currently running
                 if (this.clashContainer) {
                     this.clashContainer.classList.remove('clash-active');
                 }
 
-                // Get the emoji and update the HTML
-                const icon = POWER_ICONS[powerUpName] || '⭐';
-                if (this.powerupIcon) this.powerupIcon.innerText = icon;
-                
-                // Trigger the fade out animation
+                const iconSymbol = POWER_ICONS[powerUpName] || '⭐';
+                const iconElement = document.createElement('div');
+                iconElement.className = 'powerup-animation-icon';
+                iconElement.innerText = iconSymbol;
+
                 if (this.powerupContainer) {
-                    this.powerupContainer.classList.remove('clash-active');
+                    // If container isn't active, clear it first for a fresh start
+                    if (!this.powerupContainer.classList.contains('powerup-active')) {
+                         this.powerupContainer.innerHTML = ''; 
+                    }
+                    
+                    this.powerupContainer.appendChild(iconElement);
+                    
+                    // Reset animation state to keep it on screen
+                    this.powerupContainer.classList.remove('powerup-active');
                     void this.powerupContainer.offsetWidth;
-                    this.powerupContainer.classList.add('clash-active');
-                    setTimeout(() => { this.powerupContainer.classList.remove('clash-active'); }, 1000);
+                    this.powerupContainer.classList.add('powerup-active');
+
+                    // Clear previous timeout and set a new one
+                    if(this.powerupClearTimeout) clearTimeout(this.powerupClearTimeout);
+                    
+                    this.powerupClearTimeout = setTimeout(() => { 
+                        this.powerupContainer.classList.remove('powerup-active'); 
+                        this.powerupContainer.innerHTML = '';
+                    }, 1000);
                 }
             }
 
@@ -614,8 +636,7 @@
                     if (!AudioContext) return;
                     const ctx = new AudioContext();
                     
-                    // Creates a rapid 3-note magical "chime" sound
-                    const freqs = [880, 1108, 1318]; // A5, C#6, E6 notes
+                    const freqs = [880, 1108, 1318]; 
                     freqs.forEach((freq, i) => {
                         const osc = ctx.createOscillator();
                         const gain = ctx.createGain();
@@ -1347,11 +1368,18 @@
 
         function usePowerUp() {
             if (currentHunterPowerUp && currentGameState && currentGameState.processing) {
-                fxManager.triggerPowerUpEffect(currentHunterPowerUp); // Triggers the visual icon and native sound
+                // Remove local trigger to rely entirely on the broadcast from the server
                 socket.emit('activateSkill', { powerUp: currentHunterPowerUp });
                 document.getElementById('btn-powerup').style.display = 'none';
             }
         }
+        
+        socket.on('broadcastPowerUp', (data) => {
+            // Trigger visual/audio effect when the server tells us ANYONE used a powerup
+            if (fxManager) {
+                fxManager.triggerPowerUpEffect(data.powerUp);
+            }
+        });
 
         socket.on('announcement', (msg) => {
             const feed = document.getElementById('announcement-feed');
