@@ -262,11 +262,21 @@ setInterval(() => {
         let p1 = matchmakingPool[i];
         let matched = false;
         
-        // 1. Check if an existing ranked room has space and matches HuP (+/- 200)
+        // Helper to determine if players match based on their tier
+        const isMatch = (mana1, mana2) => {
+            // S+ Apex Tier: 1000+ HuP matches with ANY other 1000+ HuP
+            if (mana1 >= 1000 && mana2 >= 1000) return true;
+            // Standard Tier: Must be within +/- 200 HuP of each other
+            if (mana1 < 1000 && mana2 < 1000 && Math.abs(mana1 - mana2) <= 200) return true;
+            
+            return false;
+        };
+        
+        // 1. Check if an existing ranked room has space and matches logic
         for(let r of availableRooms) {
             if(r.players.length >= 4) continue;
             let roomMana = r.players[0].mana; 
-            if(Math.abs(p1.mana - roomMana) <= 200) {
+            if(isMatch(p1.mana, roomMana)) {
                 addPlayerToRankedRoom(p1, r);
                 matchmakingPool.splice(i, 1);
                 i--;
@@ -279,7 +289,7 @@ setInterval(() => {
         // 2. Pair with another player in the pool waiting
         for(let j = i + 1; j < matchmakingPool.length; j++) {
             let p2 = matchmakingPool[j];
-            if(Math.abs(p1.mana - p2.mana) <= 200) {
+            if(isMatch(p1.mana, p2.mana)) {
                 createRankedRoom(p1, p2);
                 matchmakingPool.splice(j, 1);
                 matchmakingPool.splice(i, 1);
