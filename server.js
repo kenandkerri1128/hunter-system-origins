@@ -192,9 +192,10 @@ async function broadcastWorldRankings(targetSocket = null) {
 
 function syncAllMonoliths() {
     // Exclude Ranked match rooms from the public unranked list
+    // Include the hasPassword boolean so the client can show the lock icon
     const list = Object.values(rooms)
         .filter(r => r.isOnline && !r.active && !r.isRanked)
-        .map(r => ({ id: r.id, name: r.name, count: r.players.length }));
+        .map(r => ({ id: r.id, name: r.name, count: r.players.length, hasPassword: !!r.password }));
         
     io.emit('updateGateList', list); 
 
@@ -330,6 +331,7 @@ function createRankedRoom(p1, p2) {
     const id = `ranked_${Date.now()}`;
     rooms[id] = {
         id, name: `RANKED MATCH`, isOnline: true, isRanked: true, active: false, processing: false,
+        password: null, // Ranked matches never have passwords
         turn: 0, currentRoundMoves: 0, round: 1, spawnCounter: 0, 
         survivorTurns: 0, respawnHappened: false, currentBattle: null,
         players: [], world: {}, afkTimer: null
@@ -614,6 +616,7 @@ io.on('connection', (socket) => {
         }
     });
 
+    // WORLD / ROOM MESSAGE
     socket.on('sendMessage', (data) => {
         const now = Date.now();
         if (now - socket.lastMsgTime < 1000) { 
@@ -627,6 +630,32 @@ io.on('connection', (socket) => {
         const payload = { sender: data.senderName, text: safeMessage, rank: data.rank, timestamp: new Date().toLocaleTimeString(), isAdmin: (data.senderName === ADMIN_NAME) };
         if (data.senderName === ADMIN_NAME && data.roomId === 'global') io.emit('receiveMessage', payload);
         else io.to(data.roomId).emit('receiveMessage', payload);
+    });
+
+    // DIRECT MESSAGE (DM)
+    socket.on('sendDM', (data) => {
+        const now = Date.now();
+        if (now - socket.lastMsgTime < 1000) return socket.emit('announcement', 'SYSTEM: Slow down your transmission.');
+        socket.lastMsgTime = now;
+
+        const targetSocketId = connectedUsers[data.target];
+        if (!targetSocketId) {
+            return socket.emit('announcement', `SYSTEM: HUNTER [${data.target}] IS NOT ONLINE OR DOES NOT EXIST.`);
+        }
+        
+        const safeMessage = data.message.substring(0, 200);
+        const payload = { 
+            sender: data.senderName, 
+            target: data.target,
+            text: safeMessage, 
+            timestamp: new Date().toLocaleTimeString(),
+            isAdmin: (data.senderName === ADMIN_NAME)
+        };
+
+        io.to(targetSocketId).emit('receiveDM', payload);
+        if (targetSocketId !== socket.id) {
+            socket.emit('receiveDM', payload); // Show in sender's own window
+        }
     });
 
     socket.on('requestGateList', syncAllMonoliths);
@@ -655,7 +684,7 @@ io.on('connection', (socket) => {
         matchmakingPool = matchmakingPool.filter(p => p.id !== socket.id);
     });
 
-    // UNRANKED CUSTOM ROOM
+    // UNRANKED CUSTOM ROOM WITH PASSWORD
     socket.on('createGate', async (data) => {
         const now = Date.now();
         if (now - socket.lastGateTime < 5000) { 
@@ -669,6 +698,7 @@ io.on('connection', (socket) => {
         
         rooms[id] = {
             id, name: data.name, isOnline: true, isRanked: false, active: false, processing: false,
+            password: data.password || null, // Stores optional password
             turn: 0, currentRoundMoves: 0, round: 1, spawnCounter: 0, 
             survivorTurns: 0, respawnHappened: false, currentBattle: null,
             players: [{ 
@@ -690,8 +720,15 @@ io.on('connection', (socket) => {
 
     socket.on('joinGate', async (data) => {
         const r = rooms[data.gateID];
+        if(!r) return;
+
+        // Check password explicitly before allowing entry
+        if (r.password && r.password !== data.password) {
+            return socket.emit('announcement', 'SYSTEM: INCORRECT ROOM PASSWORD. ENTRY DENIED.');
+        }
+
         // Only allow join if it's not Ranked
-        if(r && r.players.length < 4 && !r.isRanked && !r.players.some(p => p.name === data.user)) {
+        if(r.players.length < 4 && !r.isRanked && !r.players.some(p => p.name === data.user)) {
             const slot = [0,1,2,3].find(s => !r.players.some(p => p.slot === s));
             const wr = await getWorldRankDisplay(data.user);
             const mana = Math.floor(Math.random() * 251) + 50;
@@ -727,6 +764,7 @@ io.on('connection', (socket) => {
         
         rooms[id] = {
             id, isOnline: false, isRanked: false, active: false, processing: false, mode: data.diff,
+            password: null,
             turn: 0, currentRoundMoves: 0, round: 1, spawnCounter: 0, 
             survivorTurns: 0, respawnHappened: false, currentBattle: null,
             players: [
