@@ -590,6 +590,11 @@
                 // Synthesize the sparkle sound natively
                 this.playSparkleSound();
                 
+                // Override/cancel the sword clash animation if it's currently running
+                if (this.clashContainer) {
+                    this.clashContainer.classList.remove('clash-active');
+                }
+
                 // Get the emoji and update the HTML
                 const icon = POWER_ICONS[powerUpName] || '⭐';
                 if (this.powerupIcon) this.powerupIcon.innerText = icon;
