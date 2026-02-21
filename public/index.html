@@ -125,8 +125,13 @@
         #auth-msg { color: var(--rank-s); font-family: 'Orbitron'; height: 20px; font-size: 0.9rem; margin-bottom: 10px; text-shadow: 0 0 5px var(--rank-s); }
 
         .profile-container { display: flex; width: 95vw; height: auto; gap: 20px; }
-        .menu-section { border: 1px solid #222; background: rgba(10,10,10,0.8); padding: 20px; display: flex; flex-direction: column; }
         
+        /* SCROLLABLE MENU SECTION FOR MOBILE */
+        .menu-section { border: 1px solid #222; background: rgba(10,10,10,0.8); padding: 20px; display: flex; flex-direction: column; overflow-y: auto; }
+        
+        .social-btn { display: flex; flex-direction: column; align-items: center; text-decoration: none; font-family: 'Orbitron'; font-size: 0.7rem; font-weight: 900; transition: 0.2s; gap: 5px; opacity: 0.7; }
+        .social-btn:hover { opacity: 1; transform: scale(1.1); filter: drop-shadow(0 0 10px currentColor); }
+
         #game-wrapper { display: flex; flex: 1; align-items: center; justify-content: center; padding: 10px; height: 100%; }
 
         #game-board { 
@@ -192,23 +197,12 @@
             z-index: 20; text-shadow: none; pointer-events: none;
         }
 
-        .chat-container { 
-            display: flex; 
-            flex-direction: column; 
-            background: rgba(0,0,0,0.6); 
-            border: 1px solid #333; 
-            position: absolute; 
-            top: 0; left: 0; right: 0; bottom: 0; 
-        }
-        .chat-messages { 
-            flex-grow: 1; 
-            overflow-y: auto; 
-            padding: 5px; 
-            font-size: 0.8rem; 
-            font-family: 'Exo 2'; 
-            scrollbar-width: thin; 
-            height: 0; 
-        }
+        /* NEW TABBED CHAT STYLES */
+        .chat-container { display: flex; flex-direction: column; background: rgba(0,0,0,0.6); border: 1px solid #333; position: absolute; top: 0; left: 0; right: 0; bottom: 0; }
+        .chat-tabs { display: flex; background: #111; border-bottom: 1px solid #333; }
+        .chat-tab { flex: 1; padding: 5px; cursor: pointer; text-align: center; color: #888; font-size: 0.7rem; font-weight: 900; transition: 0.2s; }
+        .chat-tab.active { color: var(--sys-blue); background: #222; border-bottom: 2px solid var(--sys-blue); }
+        .chat-messages { flex-grow: 1; overflow-y: auto; padding: 5px; font-size: 0.8rem; font-family: 'Exo 2'; scrollbar-width: thin; height: 0; }
         .chat-messages div { margin-bottom: 2px; line-height: 1.2; word-wrap: break-word;}
         .chat-input-area { display: flex; border-top: 1px solid #333; height: 40px; }
         .chat-input-area input { flex-grow: 1; background: transparent; border: none; color: white; padding: 5px; outline: none; font-family: 'Exo 2'; font-size: 16px; }
@@ -340,7 +334,6 @@
                 <div id="world-rank-list" style="width: 100%; overflow-y: auto; flex-grow: 1; border-top: 2px solid var(--sys-blue); margin-top: 10px; max-height: 400px;"></div>
                 
                 <div style="width: 100%; height: 250px; display: flex; flex-direction: column; margin-top: 20px;">
-                    <div style="background: var(--sys-blue); color:black; padding: 5px; font-weight: 900; font-size: 0.8rem;">GLOBAL FREQUENCY</div>
                     <div id="chat-global-anchor" style="flex-grow: 1; position: relative;"></div>
                 </div>
             </div>
@@ -360,6 +353,21 @@
                         <div id="p-stats" style="color: #888; font-size: 0.9rem;">W: 0 | L: 0</div>
                         <div id="p-mp" style="color: var(--sys-blue); font-size: 1rem;">HuP: ---</div>
                     </div>
+                </div>
+
+                <div id="player-socials" style="display: none; justify-content: space-around; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 20px; border-top: 1px solid #333; border-bottom: 1px solid #333; padding: 15px 0;">
+                    <a href="https://patreon.com/OriginManaSiege" target="_blank" class="social-btn" style="color: #f96854;">
+                        <svg viewBox="0 0 24 24" width="28" height="28" fill="currentColor"><path d="M15.386.524c-4.764 0-8.64 3.876-8.64 8.64 0 4.75 3.876 8.613 8.64 8.613 4.75 0 8.614-3.864 8.614-8.613C24 4.4 20.136.524 15.386.524zM.003 23.537h4.22V.524H.003v23.013z"/></svg>
+                        <span>PATREON</span>
+                    </a>
+                    <a href="https://web.facebook.com/profile.php?id=61588484191399" target="_blank" class="social-btn" style="color: #1877F2;">
+                        <svg viewBox="0 0 24 24" width="28" height="28" fill="currentColor"><path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.469h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.469h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/></svg>
+                        <span>FACEBOOK</span>
+                    </a>
+                    <a href="https://www.instagram.com/originmanasiege/" target="_blank" class="social-btn" style="color: #E1306C;">
+                        <svg viewBox="0 0 24 24" width="28" height="28" fill="currentColor"><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zM12 0C8.741 0 8.333.014 7.053.072 2.695.272.273 2.69.073 7.052.014 8.333 0 8.741 0 12c0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98C8.333 23.986 8.741 24 12 24c3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98C15.668.014 15.259 0 12 0zm0 5.838a6.162 6.162 0 100 12.324 6.162 6.162 0 000-12.324zM12 16a4 4 0 110-8 4 4 0 010 8zm6.406-11.845a1.44 1.44 0 100 2.881 1.44 1.44 0 000-2.881z"/></svg>
+                        <span>INSTAGRAM</span>
+                    </a>
                 </div>
 
                 <div id="admin-controls" style="display:none; flex-direction:column; gap:5px; margin-bottom: 20px; width: 100%;">
@@ -395,8 +403,9 @@
                     <button class="sys-btn gold" style="flex-grow: 1; width: 100%; margin: 0; font-size:1.1rem;" onclick="startMatchmaking()">MATCHMAKING (RANKED PVP)</button>
                 </div>
 
-                <div style="display:flex; gap: 10px; margin-bottom: 10px;">
-                    <input id="room-name" class="sys-input" style="margin:0; flex-grow:1;" placeholder="NEW CUSTOM ROOM NAME">
+                <div style="display:flex; gap: 10px; margin-bottom: 10px; flex-wrap:wrap;">
+                    <input id="room-name" class="sys-input" style="margin:0; flex-grow:1; min-width: 150px;" placeholder="NEW CUSTOM ROOM NAME">
+                    <input id="room-pass" class="sys-input" style="margin:0; width: 180px;" placeholder="PASSWORD (OPTIONAL)">
                     <button class="sys-btn" style="width: auto; margin:0;" onclick="createGate()">CREATE (UNRANKED)</button>
                 </div>
 
@@ -409,7 +418,6 @@
             </div>
 
             <div style="flex: 1; display: flex; flex-direction: column; min-height: 250px;">
-                <div style="background: #222; padding: 5px; text-align: center; font-weight: 900;">LOBBY CHAT</div>
                 <div id="chat-lobby-anchor" style="flex-grow: 1; position: relative;"></div>
             </div>
         </div>
@@ -424,7 +432,6 @@
         <div style="display:flex; gap: 20px; flex-grow: 1; width: 95vw; flex-direction: column;">
             <div id="wr-players" style="flex: 1; border: 1px solid var(--sys-blue); padding: 10px;"></div>
             <div style="flex: 1; display: flex; flex-direction: column;">
-                 <div style="background: #222; padding: 5px; text-align: center;">TEAM COMMS</div>
                  <div id="chat-waiting-anchor" style="flex-grow: 1; position: relative;"></div>
             </div>
         </div>
@@ -439,7 +446,6 @@
             <div id="ingame-party" style="margin-bottom: 10px; font-size: 0.8rem;"></div>
             
             <div style="flex-grow: 1; display: flex; flex-direction: column; min-height: 150px;">
-                <div style="background: #111; padding: 5px; font-size: 0.8rem; color: #666;">SQUAD COMMS</div>
                 <div id="chat-game-anchor" style="flex-grow: 1; position: relative;"></div>
             </div>
         </div>
@@ -484,9 +490,20 @@
 
     <div id="chat-template" style="display:none;">
         <div class="chat-container">
-            <div class="chat-messages"></div>
-            <div class="chat-input-area">
-                <input type="text" placeholder="TRANSMIT...">
+            <div class="chat-tabs">
+                <div class="chat-tab active" data-tab="room">WORLD / ROOM</div>
+                <div class="chat-tab" data-tab="dm">DIRECT (DM)</div>
+            </div>
+            <div class="chat-messages chat-room-messages"></div>
+            <div class="chat-messages chat-dm-messages" style="display:none;"></div>
+            
+            <div class="chat-input-area chat-room-input">
+                <input type="text" placeholder="TRANSMIT TO ROOM...">
+                <button>SEND</button>
+            </div>
+            <div class="chat-input-area chat-dm-input" style="display:none;">
+                <input type="text" class="dm-target" placeholder="TARGET USER..." style="width: 35%; border-right: 1px solid #333; flex-grow: 0;">
+                <input type="text" class="dm-msg" placeholder="MESSAGE...">
                 <button>SEND</button>
             </div>
         </div>
@@ -508,6 +525,26 @@
         const BGM = document.getElementById('bgm');
 
         const POWER_ICONS = { 'DOUBLE DAMAGE': '⚔️', 'AIR WALK': '👣', 'SOUL SWAP': '🌀', 'RULERS POWER': '👑', '?': '❓' };
+
+        // NATIVE WEB AUDIO BEEP FOR DMs
+        function playDMSound() {
+            try {
+                const AudioContext = window.AudioContext || window.webkitAudioContext;
+                if (!AudioContext) return;
+                const ctx = new AudioContext();
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(600, ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(1200, ctx.currentTime + 0.1);
+                gain.gain.setValueAtTime(0.5, ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.1);
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+                osc.start();
+                osc.stop(ctx.currentTime + 0.1);
+            } catch(e) {}
+        }
 
         function playTrack(name) {
             if(!name || currentBGM === name) return;
@@ -601,9 +638,15 @@
             badgeName.style.color = rankInfo.color;
             badgeName.style.textShadow = `0 0 10px ${rankInfo.color}`;
             
+            // HIDE SOCIALS FOR ADMIN, SHOW FOR REGULAR PLAYERS
             if (d.isAdmin) {
                 document.getElementById('admin-controls').style.display = 'flex';
                 document.getElementById('admin-room-panel').style.display = 'flex';
+                document.getElementById('player-socials').style.display = 'none';
+            } else {
+                document.getElementById('admin-controls').style.display = 'none';
+                document.getElementById('admin-room-panel').style.display = 'none';
+                document.getElementById('player-socials').style.display = 'flex';
             }
 
             if (!d.reconnected) {
@@ -745,23 +788,68 @@
             }
         });
 
+        // REBUILT TABBED CHAT INIT
         let chatElement = null;
         function initChat() {
             const tpl = document.getElementById('chat-template');
             chatElement = tpl.firstElementChild.cloneNode(true);
-            const btn = chatElement.querySelector('button');
-            const inp = chatElement.querySelector('input');
-            const send = () => {
-                if (inp.value.trim() && myHunter) {
+            
+            const tabRoom = chatElement.querySelector('.chat-tab[data-tab="room"]');
+            const tabDM = chatElement.querySelector('.chat-tab[data-tab="dm"]');
+            const msgRoom = chatElement.querySelector('.chat-room-messages');
+            const msgDM = chatElement.querySelector('.chat-dm-messages');
+            const inputRoom = chatElement.querySelector('.chat-room-input');
+            const inputDM = chatElement.querySelector('.chat-dm-input');
+
+            // Switch to Room Tab
+            tabRoom.onclick = () => {
+                tabRoom.classList.add('active'); tabDM.classList.remove('active');
+                msgRoom.style.display = 'block'; msgDM.style.display = 'none';
+                inputRoom.style.display = 'flex'; inputDM.style.display = 'none';
+                msgRoom.scrollTop = msgRoom.scrollHeight;
+                tabRoom.style.color = ''; // reset notification glow
+            };
+
+            // Switch to DM Tab
+            tabDM.onclick = () => {
+                tabDM.classList.add('active'); tabRoom.classList.remove('active');
+                msgDM.style.display = 'block'; msgRoom.style.display = 'none';
+                inputDM.style.display = 'flex'; inputRoom.style.display = 'none';
+                msgDM.scrollTop = msgDM.scrollHeight;
+                tabDM.style.color = ''; // reset notification glow
+            };
+
+            // Room Send
+            const btnRoom = inputRoom.querySelector('button');
+            const inpRoom = inputRoom.querySelector('input');
+            const sendRoom = () => {
+                if (inpRoom.value.trim() && myHunter) {
                     socket.emit('sendMessage', { 
-                        message: inp.value, senderName: myHunter.username, 
+                        message: inpRoom.value, senderName: myHunter.username, 
                         roomId: myRoomID, rank: (myHunter.mana) ? getShortRankLabel(myHunter.mana) : 'Rank ?'
                     });
-                    inp.value = '';
+                    inpRoom.value = '';
                 }
             };
-            btn.onclick = send;
-            inp.onkeydown = (e) => { if(e.key === 'Enter') send(); };
+            btnRoom.onclick = sendRoom;
+            inpRoom.onkeydown = (e) => { if(e.key === 'Enter') sendRoom(); };
+
+            // DM Send
+            const btnDM = inputDM.querySelector('button');
+            const targetDM = inputDM.querySelector('.dm-target');
+            const msgInpDM = inputDM.querySelector('.dm-msg');
+            const sendDM = () => {
+                if (targetDM.value.trim() && msgInpDM.value.trim() && myHunter) {
+                    socket.emit('sendDM', {
+                        target: targetDM.value.trim(),
+                        message: msgInpDM.value,
+                        senderName: myHunter.username
+                    });
+                    msgInpDM.value = '';
+                }
+            };
+            btnDM.onclick = sendDM;
+            msgInpDM.onkeydown = (e) => { if(e.key === 'Enter') sendDM(); };
         }
         initChat();
 
@@ -769,13 +857,13 @@
             myRoomID = roomId;
             socket.emit('joinChatRoom', roomId);
             const anchor = document.getElementById(anchorId);
-            const box = chatElement.querySelector('.chat-messages');
-            box.innerHTML = ''; 
+            chatElement.querySelector('.chat-room-messages').innerHTML = ''; 
             anchor.appendChild(chatElement);
         }
 
+        // Room Chat Receive
         socket.on('receiveMessage', (data) => {
-            const box = chatElement.querySelector('.chat-messages');
+            const box = chatElement.querySelector('.chat-room-messages');
             const line = document.createElement('div');
             if (data.isAdmin) line.classList.add('admin-msg');
             line.innerHTML = `<span style="color:#aaa; font-size:0.7em;">[${data.timestamp}]</span> 
@@ -784,6 +872,30 @@
                               </span>: <span style="color:#fff;">${data.text}</span>`;
             box.appendChild(line);
             box.scrollTop = box.scrollHeight;
+        });
+
+        // DM Chat Receive
+        socket.on('receiveDM', (data) => {
+            const msgDM = chatElement.querySelector('.chat-dm-messages');
+            const tabDM = chatElement.querySelector('.chat-tab[data-tab="dm"]');
+            const line = document.createElement('div');
+            
+            // Unique DM styling (Magenta Color)
+            let color = 'var(--rank-a)'; 
+            let prefix = (data.sender === myHunter.username) ? `TO [${data.target}]` : `FROM [${data.sender}]`;
+            
+            line.innerHTML = `<span style="color:#aaa; font-size:0.7em;">[${data.timestamp}]</span> 
+                              <span style="color:${color}; font-weight:900;">${prefix}</span>: 
+                              <span style="color:#fff;">${data.text}</span>`;
+            msgDM.appendChild(line);
+            msgDM.scrollTop = msgDM.scrollHeight;
+
+            if (data.sender !== myHunter.username) {
+                playDMSound(); // Custom beep sound strictly for receiving DMs
+                if (!tabDM.classList.contains('active')) {
+                    tabDM.style.color = color; // Glow tab if unread
+                }
+            }
         });
 
         socket.on('updateAdminRoomList', (l) => {
@@ -902,9 +1014,12 @@
         }
 
         function openOnlineLobby() { if(!myHunter) return; showScreen('screen-lobby'); socket.emit('requestGateList'); }
+        
+        // Custom Gate Creation with Optional Password
         function createGate() { 
             const name = document.getElementById('room-name').value; 
-            if (name) socket.emit('createGate', { host: myHunter.username, name, cosmetics: myHunter.activeCosmetics }); 
+            const pass = document.getElementById('room-pass').value;
+            if (name) socket.emit('createGate', { host: myHunter.username, name, password: pass, cosmetics: myHunter.activeCosmetics }); 
         }
 
         // MATCHMAKING FRONTEND FUNCTIONS
@@ -928,8 +1043,23 @@
 
         socket.on('updateGateList', (list) => {
             const el = document.getElementById('room-list');
-            el.innerHTML = list.map(r => `<div class="room-item" onclick="socket.emit('joinGate', {gateID: '${r.id}', user: myHunter.username, cosmetics: myHunter.activeCosmetics})"><span>${r.name} ${myHunter.isAdmin ? `<small style="color:red">[${r.id}]</small>` : ''}</span><span style="color:var(--sys-blue)">${r.count}/4</span></div>`).join('');
+            el.innerHTML = list.map(r => `
+                <div class="room-item" onclick="joinRoomPrompt('${r.id}', ${r.hasPassword})">
+                    <span>${r.hasPassword ? '🔒 ' : ''}${r.name} ${myHunter.isAdmin ? `<small style="color:red">[${r.id}]</small>` : ''}</span>
+                    <span style="color:var(--sys-blue)">${r.count}/4</span>
+                </div>
+            `).join('');
         });
+
+        // Prompt for password if the room is locked
+        function joinRoomPrompt(gateID, hasPassword) {
+            let pass = null;
+            if (hasPassword) {
+                pass = prompt("ENTER ROOM PASSWORD TO JOIN:");
+                if (pass === null) return; // Cancelled
+            }
+            socket.emit('joinGate', { gateID: gateID, user: myHunter.username, cosmetics: myHunter.activeCosmetics, password: pass });
+        }
 
         socket.on('waitingRoomUpdate', (room) => {
             currentGateID = room.id;
@@ -1079,7 +1209,7 @@
             el.innerText = `[SYSTEM]: ${msg}`;
             feed.prepend(el);
             
-            if(msg.includes("ITEM LOCKED")) {
+            if(msg.includes("ITEM LOCKED") || msg.includes("INCORRECT ROOM PASSWORD")) {
                 alert(msg);
             }
         });
