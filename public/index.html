@@ -383,6 +383,7 @@
                 <div style="margin-top: auto; display: flex; flex-direction: column; gap: 10px; width: 100%;">
                     <button class="sys-btn" style="width: 100%; border-color:var(--sys-gold); color:var(--sys-gold);" onclick="socket.emit('requestInventoryUpdate', myHunter.username); showScreen('screen-inventory'); renderInventory('skin');">VAULT (INVENTORY)</button>
                     <button class="sys-btn gold" style="width: 100%;" onclick="startAI('Eagle')">EAGLE MODE (+6)</button>
+                    <button id="btn-system-guide" class="sys-btn" style="width: 100%; border-color:var(--sys-blue); color:var(--sys-blue);" onclick="window.open('/guide.html', '_blank')">SYSTEM GUIDE</button>
                     <button class="sys-btn" style="width: 100%;" onclick="openOnlineLobby()">MULTIPLAYER</button>
                     <button class="sys-btn danger" style="width: 100%; border-color:#444; color:#666;" onclick="doLogout()">LOGOUT</button>
                 </div>
@@ -638,15 +639,17 @@
             badgeName.style.color = rankInfo.color;
             badgeName.style.textShadow = `0 0 10px ${rankInfo.color}`;
             
-            // HIDE SOCIALS FOR ADMIN, SHOW FOR REGULAR PLAYERS
+            // HIDE SOCIALS AND GUIDE FOR ADMIN, SHOW FOR REGULAR PLAYERS
             if (d.isAdmin) {
                 document.getElementById('admin-controls').style.display = 'flex';
                 document.getElementById('admin-room-panel').style.display = 'flex';
                 document.getElementById('player-socials').style.display = 'none';
+                document.getElementById('btn-system-guide').style.display = 'none';
             } else {
                 document.getElementById('admin-controls').style.display = 'none';
                 document.getElementById('admin-room-panel').style.display = 'none';
                 document.getElementById('player-socials').style.display = 'flex';
+                document.getElementById('btn-system-guide').style.display = 'block';
             }
 
             if (!d.reconnected) {
