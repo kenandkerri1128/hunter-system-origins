@@ -739,10 +739,10 @@ io.on('connection', (socket) => {
                     syncAllMonoliths();
                     return; // DO NOT CALL handleDisconnect here
                 } else {
-                    // Regular Quit (In-Game or Unranked)
+                    // Regular Quit (In-Game or Unranked/Solo)
                     let loss = 0;
                     if(room.isOnline) loss = room.isRanked ? -20 : 0;
-                    else loss = -5;
+                    else loss = -3;
                     
                     if(loss !== 0) dbUpdateHunter(p.name, loss, false);
                 }
@@ -768,7 +768,7 @@ io.on('connection', (socket) => {
                         if (p && !p.quit) {
                             let loss = 0;
                             if(room.isOnline) loss = room.isRanked ? -20 : 0;
-                            else loss = -5;
+                            else loss = -3;
                             if(loss !== 0) dbUpdateHunter(p.name, loss, false);
                         }
                     }
@@ -988,7 +988,7 @@ function handleWin(room, winner) {
         if(room.isRanked) { wGain = 25; lLoss = -5; }
         else { wGain = 0; lLoss = 0; }
     } else {
-        wGain = 6; lLoss = -3;
+        wGain = 6; lLoss = -5;
     }
     
     if(wGain > 0) dbUpdateHunter(winner, wGain, true);
@@ -1155,4 +1155,3 @@ async function broadcastGameState(room) {
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => console.log(`SYSTEM: ONLINE ON PORT ${PORT}`));
-
