@@ -242,7 +242,7 @@
         
         #victory-screen { justify-content: center; padding: 0; background: rgba(0,0,0,0.98); z-index: 10000; text-align: center; }
 
-        .room-item { padding: 15px; border: 1px solid #333; margin-bottom: 5px; background: rgba(0,210,255,0.05); cursor: pointer; display: flex; justify-content: space-between; align-items: center; transition: 0.2s; box-sizing: border-box; }
+        .room-item { padding: 15px; border: 1px solid #333; margin-bottom: 5px; background: rgba(0,210,255,0.05); cursor: pointer; display: flex; justify-content: space-between; align-items: center; transition: 0.2s; }
         .room-item:hover { background: rgba(0,210,255,0.2); border-color: var(--sys-blue); }
 
         .hud-left { width: 300px; display: flex; flex-direction: column; height: 100%; border-right: 1px solid #333; padding: 20px; flex-shrink: 0; }
@@ -391,7 +391,7 @@
             <button class="sys-btn" style="width: 45%;" onclick="renderInventory('music')">MUSIC</button>
         </div>
         
-        <div id="inv-grid" style="display:flex; gap:15px; flex-wrap:wrap; justify-content: center; width:100%; max-width:1000px; flex-grow:1; min-height:300px; border:1px solid #333; background: rgba(0,0,0,0.5); padding: 15px;">
+        <div id="inv-grid" style="display:flex; gap:15px; flex-wrap:wrap; justify-content: center; width:100%; max-width:1000px; flex-grow:1; border:1px solid #333; background: rgba(0,0,0,0.5); padding: 15px;">
         </div>
     </div>
 
@@ -625,7 +625,7 @@
                 }
             }
             
-            triggerPowerUpEffect(powerUpName) {
+            triggerPowerUpEffect(powerUpName, hunterName) {
                 this.playSparkleSound();
                 
                 if (this.clashContainer) {
@@ -633,16 +633,35 @@
                 }
 
                 const iconSymbol = POWER_ICONS[powerUpName] || '⭐';
+                
+                const wrapper = document.createElement('div');
+                wrapper.style.display = 'flex';
+                wrapper.style.flexDirection = 'column';
+                wrapper.style.alignItems = 'center';
+
                 const iconElement = document.createElement('div');
                 iconElement.className = 'powerup-animation-icon';
                 iconElement.innerText = iconSymbol;
+                
+                const nameElement = document.createElement('div');
+                nameElement.innerText = hunterName || 'UNKNOWN';
+                nameElement.style.color = '#fff';
+                nameElement.style.fontFamily = 'Orbitron';
+                nameElement.style.fontWeight = '900';
+                nameElement.style.fontSize = '1.5rem';
+                nameElement.style.textShadow = '0 0 10px var(--sys-gold), 0 0 20px var(--sys-gold)';
+                nameElement.style.marginTop = '10px';
+                nameElement.style.textTransform = 'uppercase';
+
+                wrapper.appendChild(iconElement);
+                wrapper.appendChild(nameElement);
 
                 if (this.powerupContainer) {
                     if (!this.powerupContainer.classList.contains('powerup-active')) {
                          this.powerupContainer.innerHTML = ''; 
                     }
                     
-                    this.powerupContainer.appendChild(iconElement);
+                    this.powerupContainer.appendChild(wrapper);
                     
                     this.powerupContainer.classList.remove('powerup-active');
                     void this.powerupContainer.offsetWidth;
@@ -1385,7 +1404,7 @@
         
         socket.on('broadcastPowerUp', (data) => {
             if (fxManager) {
-                fxManager.triggerPowerUpEffect(data.powerUp);
+                fxManager.triggerPowerUpEffect(data.powerUp, data.hunter);
             }
         });
 
