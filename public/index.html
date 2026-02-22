@@ -443,7 +443,7 @@
 
                 <div id="tutorial-video-container" style="display: none; width: 100%; margin-bottom: 20px; border: 1px solid var(--sys-blue); box-shadow: 0 0 10px rgba(0, 210, 255, 0.2); box-sizing: border-box; padding: 10px; background: rgba(0,0,0,0.8);">
                     <div style="color: var(--sys-gold); font-family: 'Orbitron'; font-weight: 900; font-size: 0.8rem; margin-bottom: 10px; text-align: center; letter-spacing: 1px;">SYSTEM TUTORIAL</div>
-                    <video src="assets/tutorial.mp4" controls playsinline style="width: 100%; height: auto; border: 1px solid #333; outline: none;"></video>
+                    <video id="tutorial-video" src="assets/tutorial.mp4" controls playsinline style="width: 100%; height: auto; border: 1px solid #333; outline: none;"></video>
                 </div>
 
                 <div style="margin-top: auto; display: flex; flex-direction: column; gap: 10px; width: 100%;">
@@ -773,6 +773,25 @@
                 document.removeEventListener('click', startAudio);
             };
             document.addEventListener('click', startAudio);
+
+            // --- TUTORIAL VIDEO AUDIO FIX ---
+            const tutorialVideo = document.getElementById('tutorial-video');
+            if (tutorialVideo) {
+                tutorialVideo.addEventListener('play', () => { 
+                    BGM.pause(); 
+                });
+                tutorialVideo.addEventListener('pause', () => { 
+                    // Only resume BGM if we are actually on the profile menu screen
+                    if(document.getElementById('screen-menu').classList.contains('active')) {
+                        BGM.play().catch(()=>{}); 
+                    }
+                });
+                tutorialVideo.addEventListener('ended', () => { 
+                    if(document.getElementById('screen-menu').classList.contains('active')) {
+                        BGM.play().catch(()=>{}); 
+                    }
+                });
+            }
 
             const stored = sessionStorage.getItem('hunter_creds');
             if(stored) {
