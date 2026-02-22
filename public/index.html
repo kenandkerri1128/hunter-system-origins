@@ -291,14 +291,12 @@
             h1 { font-size: 2.2rem !important; }
             h2 { font-size: 1.5rem !important; }
             
-            /* ADDED 150px PADDING SO BOTTOM BUTTONS ARE ALWAYS CLICKABLE ABOVE NAV BAR */
-            .screen { padding: 2vh 10px 150px 10px !important; height: 100dvh !important; overflow-x: hidden !important; overflow-y: auto !important; display: flex; justify-content: flex-start; } 
+            /* REMOVED DISPLAY:FLEX FROM HERE TO FIX THE VICTORY SCREEN BUG */
+            .screen { padding: 2vh 10px 150px 10px !important; height: 100dvh !important; overflow-x: hidden !important; overflow-y: auto !important; justify-content: flex-start; } 
             
-            /* REVERSED PROFILE TO PUT NAME/BUTTONS ON TOP, CHAT ON BOTTOM */
             .profile-container { flex-direction: column !important; width: 100%; gap: 15px; padding: 0 10px; }
             .menu-section { width: 100%; padding: 15px; flex: none !important; } 
             
-            /* FIXED LOBBY STRUCTURE TO REMOVE HUGE GAP */
             .lobby-header { flex-direction: row !important; width: 100% !important; margin-bottom: 10px !important; }
             .lobby-header h2 { font-size: 1.5rem !important; }
             .lobby-header button { min-width: 80px !important; padding: 8px 15px !important; margin: 0 !important; width: auto !important; }
@@ -317,7 +315,6 @@
             .hud-left { order: 3; width: 100%; border-right: none; border-top: 1px solid #333; padding: 10px; height: auto; flex-shrink: 1; box-sizing: border-box;}
             .rank-table { display: none; } 
             
-            /* FULL WIDTH ELEMENTS TO FIX ZOOM OUT BUG */
             .sys-btn { width: 100% !important; margin: 5px 0 !important; box-sizing: border-box; }
             .sys-input { width: 100% !important; max-width: 100% !important; box-sizing: border-box; margin: 5px 0 !important;}
         }
@@ -805,6 +802,11 @@
         });
 
         socket.on('authSuccess', (d) => {
+            // META PIXEL TRACKING
+            if (typeof fbq !== 'undefined') {
+                fbq('track', 'CompleteRegistration', { content_name: 'Origin: Mana Siege' });
+            }
+
             myHunter = d;
             sessionStorage.setItem('hunter_creds', JSON.stringify({u: d.username, p: currentPass}));
             document.getElementById('p-name').innerText = d.username;
